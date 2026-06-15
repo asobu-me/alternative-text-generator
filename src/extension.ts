@@ -17,20 +17,20 @@ import { processSingleVideoTag } from './services/videoProcessor';
 import { needsSurroundingText } from './core/prompts';
 
 // Constants
-import { SELECTION_THRESHOLDS, MASKING, BATCH_PROCESSING, CONTEXT_RANGE_VALUES } from './constants';
+import { SELECTION_THRESHOLDS, BATCH_PROCESSING, CONTEXT_RANGE_VALUES } from './constants';
 
 export async function activate(context: vscode.ExtensionContext) {
     // Watch for configuration changes
     const configWatcher = vscode.workspace.onDidChangeConfiguration(async (e) => {
         // Clear output language cache when output language setting changes
-        if (e.affectsConfiguration('altGenGemini.outputLanguage')) {
+        if (e.affectsConfiguration('autoAltWriter.outputLanguage')) {
             clearOutputLanguageCache();
         }
     });
     context.subscriptions.push(configWatcher);
 
     // Smart ALT/aria-label generation command (auto-detect tag type)
-    let disposable = vscode.commands.registerCommand('alt-generator.generateAlt', async () => {
+    const disposable = vscode.commands.registerCommand('auto-alt-writer.generateAlt', async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showErrorMessage('❌ No active editor');
@@ -48,10 +48,10 @@ export async function activate(context: vscode.ExtensionContext) {
             const tagType = detectTagType(editor, firstSelection);
 
             if (tagType === 'video') {
-                await vscode.commands.executeCommand('alt-generator.generateVideoAriaLabel');
+                await vscode.commands.executeCommand('auto-alt-writer.generateVideoAriaLabel');
                 return;
             } else if (tagType === 'img') {
-                await generateAltForImages(context, editor, selections);
+                await generateAltForImages(editor, selections);
                 return;
             } else {
                 vscode.window.showErrorMessage('❌ No img or video tag found');
@@ -71,14 +71,14 @@ export async function activate(context: vscode.ExtensionContext) {
             const videoTags = allTags.filter(tag => tag.type === 'video');
 
             // Process tags
-            await processMultipleTags(context, editor, imgTags, videoTags);
+            await processMultipleTags(editor, imgTags, videoTags);
         }
     });
 
     context.subscriptions.push(disposable);
 
     // Video tag aria-label generation command
-    let videoDisposable = vscode.commands.registerCommand('alt-generator.generateVideoAriaLabel', async () => {
+    const videoDisposable = vscode.commands.registerCommand('auto-alt-writer.generateVideoAriaLabel', async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showErrorMessage('❌ No active editor');
@@ -88,7 +88,7 @@ export async function activate(context: vscode.ExtensionContext) {
         const selection = editor.selection;
 
         // Get insertion mode from settings
-        const config = vscode.workspace.getConfiguration('altGenGemini');
+        const config = vscode.workspace.getConfiguration('autoAltWriter');
         const insertionMode = config.get<'auto' | 'confirm'>('insertionMode', 'confirm');
 
         await vscode.window.withProgress({
@@ -97,7 +97,7 @@ export async function activate(context: vscode.ExtensionContext) {
             cancellable: true
         }, async (progress, token) => {
             try {
-                const result = await processSingleVideoTag(context, editor, selection, token, insertionMode, undefined, progress);
+                const result = await processSingleVideoTag(editor, selection, token, insertionMode, undefined, progress);
 
                 // Show result dialog for confirm mode
                 if (result && insertionMode === 'confirm') {
@@ -106,7 +106,7 @@ export async function activate(context: vscode.ExtensionContext) {
                         vscode.window.showInformationMessage('📝 aria-label: Already described by surrounding text (not added)');
                     } else {
                         // Get video description length mode to customize message
-                        const config = vscode.workspace.getConfiguration('altGenGemini');
+                        const config = vscode.workspace.getConfiguration('autoAltWriter');
                         const videoDescriptionLength = config.get<string>('videoDescriptionMode', 'summary');
 
                         // Show confirmation dialog with appropriate message
@@ -139,42 +139,8 @@ export async function activate(context: vscode.ExtensionContext) {
     });
 
     context.subscriptions.push(videoDisposable);
-
-    // Command to set API key via input box
-    let setApiKeyDisposable = vscode.commands.registerCommand('alt-generator.setApiKey', async () => {
-        const apiKey = await vscode.window.showInputBox({
-            prompt: 'Enter your Gemini API Key',
-            placeHolder: 'AIza...',
-            password: true,
-            ignoreFocusOut: true,
-            validateInput: (value) => {
-                if (!value || value.trim() === '') {
-                    return 'API Key cannot be empty';
-                }
-                if (!value.startsWith('AIza')) {
-                    return 'Invalid API Key format. Gemini API keys typically start with "AIza"';
-                }
-                return null;
-            }
-        });
-
-        if (apiKey) {
-            await context.secrets.store('altGenGemini.geminiApiKey', apiKey);
-            vscode.window.showInformationMessage('✅ Gemini API Key saved securely');
-            console.log('[ALT Generator] API key set via command palette');
-        }
-    });
-
-    context.subscriptions.push(setApiKeyDisposable);
-
-    // Command to clear API key
-    let clearApiKeyDisposable = vscode.commands.registerCommand('alt-generator.clearApiKey', async () => {
-        await context.secrets.delete('altGenGemini.geminiApiKey');
-        vscode.window.showInformationMessage('✅ Gemini API Key cleared');
-        console.log('[ALT Generator] API key cleared');
-    });
-
-    context.subscriptions.push(clearApiKeyDisposable);
+    // Note: no API-key commands. The Gemini API key is never stored in the
+    // extension — all requests are routed through a server-side proxy (see /proxy).
 }
 
 /**
@@ -183,8 +149,7 @@ export async function activate(context: vscode.ExtensionContext) {
  */
 async function showConfirmationDialog(
     message: string,
-    totalCount: number,
-    processedCount: number
+    totalCount: number
 ): Promise<string | undefined> {
     // Single item: show only Insert and Cancel (no Skip)
     if (totalCount === 1) {
@@ -230,16 +195,20 @@ async function handleUserChoice(
 
 // Process multiple tags (mixed img and video tags)
 async function processMultipleTags(
-    context: vscode.ExtensionContext,
     editor: vscode.TextEditor,
     imgTags: Array<{type: 'img' | 'video', range: vscode.Range, text: string}>,
     videoTags: Array<{type: 'img' | 'video', range: vscode.Range, text: string}>
 ): Promise<void> {
-    // Pre-fetch configuration for batch processing optimization
+    // Pre-fetch configuration once for the whole batch (avoids per-item lookups)
     const insertionMode = getInsertionMode();
-    const config = vscode.workspace.getConfiguration('altGenGemini');
+    const config = vscode.workspace.getConfiguration('autoAltWriter');
     const generationMode = config.get<string>('altGenerationMode', 'SEO');
     const videoDescriptionLength = config.get<string>('videoDescriptionMode', 'summary') as 'summary' | 'transcript';
+    const decorativeKeywords = config.get<string[]>('decorativeKeywords', ['icon-', 'bg-', 'deco-']);
+
+    // Pre-fetched config passed to the per-item processors
+    const imageBatchOptions = { generationMode, decorativeKeywords };
+    const videoBatchOptions = { videoDescriptionLength };
 
     // Check if any custom prompts need surrounding text
     const promptType = generationMode === 'SEO' ? 'seo' : 'a11y';
@@ -312,54 +281,60 @@ async function processMultipleTags(
 
                     // Process based on tag type
                     if (isImageTag) {
-                        const result = await processSingleImageTag(context, editor, selection, token, progress, processedCount, totalCount, insertionMode, cachedContext);
+                        const result = await processSingleImageTag(editor, selection, token, progress, processedCount, totalCount, insertionMode, cachedContext, imageBatchOptions);
 
-                        // Count success/failure
-                        if (result && result.success !== false) {
-                            successCount++;
-                        } else if (!result) {
-                            failureCount++;
-                        }
-
-                        if (result && insertionMode === 'confirm') {
-                            // Calculate replaced length BEFORE edit
-                            const replacedStartOffset = editor.document.offsetAt(result.actualSelection.start);
-                            const replacedEndOffset = editor.document.offsetAt(result.actualSelection.end);
-                            const replacedLength = replacedEndOffset - replacedStartOffset;
-
-                            const choice = await showConfirmationDialog(
-                                `✅ ALT: ${result.altText}`,
-                                totalCount,
-                                processedCount
-                            );
-
-                            const shouldContinue = await handleUserChoice(
-                                choice,
-                                editor,
-                                result.actualSelection,
-                                result.newText,
-                                processedCount,
-                                totalCount
-                            );
-
-                            if (!shouldContinue) {
-                                return;
+                        // Task 6 will handle phase-2 deferred resolution — skip for now.
+                        if (result && 'kind' in result && result.kind === 'needs-manual-resolution') {
+                            // DeferredResolution: image could not be resolved statically.
+                            // Collected and handled in batch phase-2 (Task 6).
+                        } else {
+                            // Count success/failure
+                            if (result && (result as {success?: boolean}).success !== false) {
+                                successCount++;
+                            } else if (!result) {
+                                failureCount++;
                             }
 
-                            // Update offset delta after edit
-                            const newTextLength = result.newText.length;
-                            cumulativeOffsetDelta += (newTextLength - replacedLength);
-                        } else if (result && insertionMode === 'auto') {
-                            // Auto mode already edited, calculate offset delta
-                            // Note: In auto mode, safeEditDocument was already called in processSingleImageTag
-                            // We need to calculate the replaced length based on original vs new text
-                            const replacedLength = originalLength; // Use original tag length
-                            const newTextLength = result.newText.length;
-                            cumulativeOffsetDelta += (newTextLength - replacedLength);
+                            if (result && insertionMode === 'confirm') {
+                                const altResult = result as {altText: string; actualSelection: vscode.Selection; newText: string};
+                                // Calculate replaced length BEFORE edit
+                                const replacedStartOffset = editor.document.offsetAt(altResult.actualSelection.start);
+                                const replacedEndOffset = editor.document.offsetAt(altResult.actualSelection.end);
+                                const replacedLength = replacedEndOffset - replacedStartOffset;
+
+                                const choice = await showConfirmationDialog(
+                                    `✅ ALT: ${altResult.altText}`,
+                                    totalCount
+                                );
+
+                                const shouldContinue = await handleUserChoice(
+                                    choice,
+                                    editor,
+                                    altResult.actualSelection,
+                                    altResult.newText,
+                                    processedCount,
+                                    totalCount
+                                );
+
+                                if (!shouldContinue) {
+                                    return;
+                                }
+
+                                // Update offset delta after edit
+                                const newTextLength = altResult.newText.length;
+                                cumulativeOffsetDelta += (newTextLength - replacedLength);
+                            } else if (result && insertionMode === 'auto') {
+                                // Auto mode already edited, calculate offset delta
+                                // Note: In auto mode, safeEditDocument was already called in processSingleImageTag
+                                // We need to calculate the replaced length based on original vs new text
+                                const replacedLength = originalLength; // Use original tag length
+                                const newTextLength = (result as {newText: string}).newText.length;
+                                cumulativeOffsetDelta += (newTextLength - replacedLength);
+                            }
                         }
                     } else {
                         // Video tag processing
-                        const result = await processSingleVideoTag(context, editor, selection, token, insertionMode, cachedContext, progress);
+                        const result = await processSingleVideoTag(editor, selection, token, insertionMode, cachedContext, progress, videoBatchOptions);
 
                         // Count success/failure
                         if (result && result.success !== false) {
@@ -376,18 +351,15 @@ async function processMultipleTags(
                                 const replacedEndOffset = editor.document.offsetAt(result.actualSelection.end);
                                 const replacedLength = replacedEndOffset - replacedStartOffset;
 
-                                // Get video description length mode to customize message
-                                const videoDescriptionLength = config.get<string>('videoDescriptionMode', 'summary');
-
                                 // Show individual confirmation dialog with appropriate message
+                                // (videoDescriptionLength pre-fetched for the batch above)
                                 const message = videoDescriptionLength === 'transcript'
                                     ? `✅ Video description (as comment): ${result.ariaLabel}`
                                     : `✅ aria-label: ${result.ariaLabel}`;
 
                                 const choice = await showConfirmationDialog(
                                     message,
-                                    totalCount,
-                                    processedCount
+                                    totalCount
                                 );
 
                                 const shouldContinue = await handleUserChoice(
@@ -456,12 +428,15 @@ async function processMultipleTags(
 
 // ALT text generation for img tags
 async function generateAltForImages(
-    context: vscode.ExtensionContext,
     editor: vscode.TextEditor,
     selections: readonly vscode.Selection[]
 ): Promise<void> {
-        // Pre-fetch configuration for optimization
+        // Pre-fetch configuration once (avoids per-image config lookups)
         const insertionMode = getInsertionMode();
+        const config = vscode.workspace.getConfiguration('autoAltWriter');
+        const generationMode = config.get<string>('altGenerationMode', 'SEO');
+        const decorativeKeywords = config.get<string[]>('decorativeKeywords', ['icon-', 'bg-', 'deco-']);
+        const imageBatchOptions = { generationMode, decorativeKeywords };
 
         // Always display progress dialog with indeterminate animation
         await vscode.window.withProgress({
@@ -496,7 +471,6 @@ async function generateAltForImages(
 
                     // Report progress to show animation
                     const result = await processSingleImageTag(
-                        context,
                         editor,
                         selection,
                         token,
@@ -504,7 +478,8 @@ async function generateAltForImages(
                         processedCount,
                         totalCount,
                         insertionMode,
-                        cachedSurroundingText
+                        cachedSurroundingText,
+                        imageBatchOptions
                     );
 
                     // Update cache for next iteration
@@ -513,34 +488,41 @@ async function generateAltForImages(
                         lastSelectionLine = currentLine;
                     }
 
-                    // Count success/failure
-                    if (result && result.success !== false) {
-                        successCount++;
-                    } else if (!result) {
-                        // Void returned (error or cancellation)
-                        failureCount++;
-                    }
+                    // Task 6 will handle phase-2 deferred resolution — skip for now.
+                    if (result && 'kind' in result && result.kind === 'needs-manual-resolution') {
+                        // DeferredResolution: image could not be resolved statically.
+                        // Collected and handled in batch phase-2 (Task 6).
+                    } else {
+                        // Count success/failure
+                        if (result && (result as {success?: boolean}).success !== false) {
+                            successCount++;
+                        } else if (!result) {
+                            // Void returned (error or cancellation)
+                            failureCount++;
+                        }
 
-                    if (result) {
-                        if (insertionMode === 'confirm') {
-                            // Show confirmation dialog for each image immediately
-                            // Single item: show only Insert and Cancel (no Skip)
-                            const choice = await vscode.window.showInformationMessage(
-                                `✅ ALT: ${result.altText}`,
-                                'Insert',
-                                'Cancel'
-                            );
+                        if (result) {
+                            const altResult = result as {altText: string; actualSelection: vscode.Selection; newText: string};
+                            if (insertionMode === 'confirm') {
+                                // Show confirmation dialog for each image immediately
+                                // Single item: show only Insert and Cancel (no Skip)
+                                const choice = await vscode.window.showInformationMessage(
+                                    `✅ ALT: ${altResult.altText}`,
+                                    'Insert',
+                                    'Cancel'
+                                );
 
-                            if (choice === 'Insert') {
-                                const success = await safeEditDocument(editor, result.actualSelection, result.newText);
-                                if (!success) {
+                                if (choice === 'Insert') {
+                                    const success = await safeEditDocument(editor, altResult.actualSelection, altResult.newText);
+                                    if (!success) {
+                                        return;
+                                    }
+                                } else if (choice === 'Cancel') {
+                                    vscode.window.showWarningMessage(formatMessage('⏸️ Cancelled ({0}/{1} processed)', processedCount + 1, totalCount));
                                     return;
                                 }
-                            } else if (choice === 'Cancel') {
-                                vscode.window.showWarningMessage(formatMessage('⏸️ Cancelled ({0}/{1} processed)', processedCount + 1, totalCount));
-                                return;
+                                // If 'Skip', continue to next image
                             }
-                            // If 'Skip', continue to next image
                         }
                     }
                 } catch (error) {

@@ -9,10 +9,11 @@ import * as path from 'path';
 import fetch from 'node-fetch';
 import { generateAltTextWithRetry } from '../core/gemini';
 import { needsSurroundingText, getGeminiApiModel, loadCustomPrompts } from '../core/prompts';
-import { safeEditDocument, escapeHtml, sanitizeFilePath, validateImageSrc } from '../utils/security';
+import { safeEditDocument, escapeHtml, sanitizeFilePath, validateImageSrc, validateRemoteImageUrl } from '../utils/security';
 import { getMimeType } from '../utils/fileUtils';
 import { formatMessage, extractSurroundingText } from '../utils/textUtils';
 import { detectStaticFileDirectory } from './frameworkDetector';
+import { resolveImagePath } from './imagePathResolver';
 import { API_CONFIG, SPECIAL_KEYWORDS, CONTEXT_RANGE_VALUES } from '../constants';
 
 /**
@@ -24,6 +25,7 @@ interface TagInfo {
     imageSrc: string;
     imageFileName: string;
     tagType: 'img' | 'Image';
+    dynamic: boolean;
 }
 
 /**
@@ -32,6 +34,14 @@ interface TagInfo {
 interface ImageData {
     base64Image: string;
     mimeType: string;
+}
+
+/**
+ * Pre-fetched configuration shared across a batch to avoid per-image lookups
+ */
+interface ImageBatchOptions {
+    generationMode?: string;
+    decorativeKeywords?: string[];
 }
 
 /**
@@ -44,6 +54,20 @@ interface AltTextResult {
     actualSelection: vscode.Selection;
     success: boolean;
     surroundingText?: string; // Cache for next iteration
+}
+
+/**
+ * Deferred resolution for images that cannot be statically resolved.
+ * The batch caller (Task 6) collects these and resolves them in phase 2.
+ */
+export interface DeferredResolution {
+    kind: 'needs-manual-resolution';
+    unresolvedSrc: string;
+    reason: 'dynamic' | 'not-found';
+    actualSelection: vscode.Selection;
+    selectedText: string;
+    tagType: 'img' | 'Image';
+    context: { fileName: string; line: number; snippet: string };
 }
 
 /**
@@ -98,7 +122,7 @@ async function extractTagInfo(
     }
 
     // imgまたはImageタグからsrc属性を抽出
-    let srcMatch = selectedText.match(/src=(["'])([^"']+)\1/);
+    const srcMatch = selectedText.match(/src=(["'])([^"']+)\1/);
     let imageSrc: string;
 
     if (srcMatch) {
@@ -114,23 +138,21 @@ async function extractTagInfo(
         }
     }
 
-    // 入力検証
+    // 入力検証（動的式は「手動解決の対象」として扱い、ここでは弾かない）
     const validation = validateImageSrc(imageSrc);
-    if (!validation.valid) {
+    const isDynamicExpr = !validation.valid && validation.reason === 'Dynamic expression detected';
+    if (!validation.valid && !isDynamicExpr) {
+        // 危険なプロトコル / UNC / 不正URL 等は従来どおり拒否
         vscode.window.showErrorMessage(formatMessage('🚫 Invalid image source: {0}', validation.reason || 'Unknown error'));
         return null;
     }
 
-    // 動的src属性を検出
-    const isDynamic =
+    // 動的src属性を検出（エラーにせず後段の手動解決へ回す）
+    const isDynamic = isDynamicExpr || Boolean(
         imageSrc.includes('$') ||
         imageSrc.includes('(') ||
-        (imageSrc.match(/^[a-zA-Z_][a-zA-Z0-9_.]*$/) && !imageSrc.includes('/') && !imageSrc.includes('.'));
-
-    if (isDynamic) {
-        vscode.window.showErrorMessage(formatMessage('🚫 Dynamic src not supported: {0}', imageSrc));
-        return null;
-    }
+        (imageSrc.match(/^[a-zA-Z_][a-zA-Z0-9_.]*$/) && !imageSrc.includes('/') && !imageSrc.includes('.'))
+    );
 
     const imageFileName = path.basename(imageSrc);
     const tagType = selectedText.includes('<Image') ? 'Image' : 'img';
@@ -140,36 +162,48 @@ async function extractTagInfo(
         actualSelection,
         imageSrc,
         imageFileName,
-        tagType
+        tagType,
+        dynamic: isDynamic
     };
 }
 
 /**
  * Check if image is decorative based on filename
  */
-function isDecorativeImage(imageFileName: string): boolean {
-    const config = vscode.workspace.getConfiguration('altGenGemini');
-    const decorativeKeywords = config.get<string[]>('decorativeKeywords', ['icon-', 'bg-', 'deco-']);
+function isDecorativeImage(imageFileName: string, decorativeKeywords?: string[]): boolean {
+    // Use pre-fetched keywords when provided (avoids a config read per image in batches)
+    const keywords = decorativeKeywords
+        ?? vscode.workspace.getConfiguration('autoAltWriter').get<string[]>('decorativeKeywords', ['icon-', 'bg-', 'deco-']);
 
-    return decorativeKeywords.some(keyword =>
+    return keywords.some(keyword =>
         imageFileName.toLowerCase().includes(keyword.toLowerCase())
     );
 }
 
 /**
- * Load image data from file or URL
+ * Load image data from file or URL.
+ * Returns 'not-found' when a local file path is valid but the file does not exist —
+ * the caller can decide whether to offer manual resolution.
+ * Returns null for hard errors (SVG, too-large, invalid path, URL fetch failure).
  */
 async function loadImageData(
     imageSrc: string,
     editor: vscode.TextEditor
-): Promise<ImageData | null> {
+): Promise<ImageData | 'not-found' | null> {
     let base64Image: string;
     let mimeType: string;
 
     // 絶対URLの場合
     if (imageSrc.toLowerCase().startsWith('http://') || imageSrc.toLowerCase().startsWith('https://')) {
+        // SSRF対策: プライベート/ループバック/リンクローカル等の内部アドレスへのアクセスを拒否
+        const urlValidation = await validateRemoteImageUrl(imageSrc);
+        if (!urlValidation.valid) {
+            vscode.window.showErrorMessage(formatMessage('🚫 Invalid image source: {0}', urlValidation.reason || 'Blocked URL'));
+            return null;
+        }
         try {
-            const response = await fetch(imageSrc);
+            // レスポンスサイズを制限してメモリ枯渇を防ぐ
+            const response = await fetch(imageSrc, { size: API_CONFIG.MAX_IMAGE_SIZE_MB * 1024 * 1024 });
             if (!response.ok) {
                 vscode.window.showErrorMessage(formatMessage('❌ Failed to fetch image: {0}', response.statusText));
                 return null;
@@ -213,13 +247,18 @@ async function loadImageData(
         }
 
         if (!fs.existsSync(imagePath)) {
-            const displayPath = path.basename(imagePath);
-            vscode.window.showErrorMessage(formatMessage('❌ Image not found: {0}', displayPath));
-            return null;
+            return 'not-found'; // caller decides whether to offer manual resolution
         }
 
         if (path.extname(imagePath).toLowerCase() === '.svg') {
             vscode.window.showErrorMessage('🚫 SVG not supported. Convert to PNG/JPG first.');
+            return null;
+        }
+
+        // ファイルサイズチェック（読み込み前にメモリ枯渇を防ぐ）
+        const fileSizeMB = fs.statSync(imagePath).size / (1024 * 1024);
+        if (fileSizeMB > API_CONFIG.MAX_IMAGE_SIZE_MB) {
+            vscode.window.showErrorMessage(formatMessage('❌ Image too large ({0}MB). Max {1}MB.', fileSizeMB.toFixed(2), API_CONFIG.MAX_IMAGE_SIZE_MB));
             return null;
         }
 
@@ -235,27 +274,40 @@ async function loadImageData(
 }
 
 /**
- * Generate decorative ALT text (empty alt="")
+ * Load image data from an absolute file path already validated to be inside
+ * the workspace (used after manual resolution). Returns null on SVG/oversize/read error.
  */
-function generateDecorativeAlt(
-    tagInfo: TagInfo,
-    insertionMode: string
-): { newText: string; altText: string } {
+export async function loadImageFile(absPath: string): Promise<ImageData | null> {
+    if (path.extname(absPath).toLowerCase() === '.svg') {
+        vscode.window.showErrorMessage('🚫 SVG not supported. Convert to PNG/JPG first.');
+        return null;
+    }
+    if (!fs.existsSync(absPath)) {
+        vscode.window.showErrorMessage(formatMessage('❌ Image not found: {0}', path.basename(absPath)));
+        return null;
+    }
+    const fileSizeMB = fs.statSync(absPath).size / (1024 * 1024);
+    if (fileSizeMB > API_CONFIG.MAX_IMAGE_SIZE_MB) {
+        vscode.window.showErrorMessage(formatMessage('❌ Image too large ({0}MB). Max {1}MB.', fileSizeMB.toFixed(2), API_CONFIG.MAX_IMAGE_SIZE_MB));
+        return null;
+    }
+    const buffer = fs.readFileSync(absPath);
+    return { base64Image: buffer.toString('base64'), mimeType: getMimeType(absPath) };
+}
+
+/**
+ * Build the tag text with an empty alt attribute (decorative image)
+ */
+function generateDecorativeAlt(tagInfo: TagInfo): string {
     const hasAlt = /alt=["'{][^"'}]*["'}]/.test(tagInfo.selectedText);
-    let newText: string;
 
     if (hasAlt) {
-        newText = tagInfo.selectedText.replace(/alt=["'{][^"'}]*["'}]/, 'alt=""');
-    } else {
-        if (tagInfo.tagType === 'Image') {
-            newText = tagInfo.selectedText.replace(/<Image/, '<Image alt=""');
-        } else {
-            newText = tagInfo.selectedText.replace(/<img/, '<img alt=""');
-        }
+        return tagInfo.selectedText.replace(/alt=["'{][^"'}]*["'}]/, 'alt=""');
     }
-
-    const altText = insertionMode === 'auto' ? 'Decorative image' : 'Decorative image (alt="")';
-    return { newText, altText };
+    if (tagInfo.tagType === 'Image') {
+        return tagInfo.selectedText.replace(/<Image/, '<Image alt=""');
+    }
+    return tagInfo.selectedText.replace(/<img/, '<img alt=""');
 }
 
 /**
@@ -282,11 +334,112 @@ function applyAltTextToTag(
 }
 
 /**
+ * Given loaded image data and tag info, generate ALT and (in auto mode) apply it.
+ * Shared by single processing and phase-2 manual resolution.
+ */
+async function generateAndApplyAlt(
+    editor: vscode.TextEditor,
+    tagInfo: TagInfo,
+    imageData: ImageData,
+    selection: vscode.Selection,
+    token: vscode.CancellationToken | undefined,
+    insertionMode: string | undefined,
+    cachedSurroundingText: string | undefined,
+    batchOptions: ImageBatchOptions | undefined
+): Promise<AltTextResult | void> {
+    // Resolve generation mode (use pre-fetched batch value when available).
+    // No API key is needed here — the proxy holds it server-side.
+    const generationMode = batchOptions?.generationMode
+        ?? vscode.workspace.getConfiguration('autoAltWriter').get<string>('altGenerationMode', 'SEO');
+
+    // Load custom prompts once for all subsequent operations
+    const customPrompts = loadCustomPrompts();
+    const geminiModel = getGeminiApiModel(customPrompts);
+
+    // Get surrounding text (use cached if available, otherwise extract)
+    // Only extract if custom prompts require it
+    let surroundingText: string | undefined;
+    if (cachedSurroundingText !== undefined) {
+        // Use cached surrounding text for batch processing optimization
+        surroundingText = cachedSurroundingText;
+    } else {
+        // Extract surrounding text only if custom prompts contain {surroundingText} placeholder
+        const promptType = generationMode === 'SEO' ? 'seo' : 'a11y';
+        if (needsSurroundingText(promptType, undefined, customPrompts)) {
+            const contextRange = CONTEXT_RANGE_VALUES.default; // Use default context range
+            surroundingText = extractSurroundingText(editor.document, tagInfo.actualSelection, contextRange);
+        }
+    }
+
+    // Generate ALT text (errors propagate to the batch caller)
+    if (token?.isCancellationRequested) {
+        return;
+    }
+
+    const altText = await generateAltTextWithRetry(
+        imageData.base64Image,
+        imageData.mimeType,
+        generationMode,
+        geminiModel,
+        token,
+        surroundingText,
+        API_CONFIG.MAX_RETRIES
+    );
+
+    if (token?.isCancellationRequested) {
+        return;
+    }
+
+    // Handle DECORATIVE response or empty string literal from API
+    const trimmedAlt = altText.trim();
+    if (trimmedAlt === SPECIAL_KEYWORDS.DECORATIVE || trimmedAlt === '""' || trimmedAlt === '') {
+        const newText = generateDecorativeAlt(tagInfo);
+
+        // Determine the reason for empty alt
+        const reason = trimmedAlt === SPECIAL_KEYWORDS.DECORATIVE
+            ? 'Already described by surrounding text'
+            : 'Decorative image (no meaningful content)';
+
+        if (insertionMode === 'auto') {
+            const success = await safeEditDocument(editor, tagInfo.actualSelection, newText);
+            if (success) {
+                vscode.window.showInformationMessage(formatMessage('📝 {0} → alt=""', reason));
+            }
+        }
+        return {
+            selection,
+            altText: formatMessage('{0} → alt=""', reason),
+            newText,
+            actualSelection: tagInfo.actualSelection,
+            success: true,
+            surroundingText // Return for caching
+        };
+    }
+
+    // Apply ALT text
+    const newText = applyAltTextToTag(tagInfo.selectedText, altText, tagInfo.tagType);
+
+    if (insertionMode === 'auto') {
+        const success = await safeEditDocument(editor, tagInfo.actualSelection, newText);
+        if (success) {
+            vscode.window.showInformationMessage(formatMessage('✅ ALT: {0}', altText));
+        }
+    }
+    return {
+        selection,
+        altText,
+        newText,
+        actualSelection: tagInfo.actualSelection,
+        success: true,
+        surroundingText // Return for caching
+    };
+}
+
+/**
  * Process single image tag
  * Main entry point for image processing
  */
 export async function processSingleImageTag(
-    context: vscode.ExtensionContext,
     editor: vscode.TextEditor,
     selection: vscode.Selection,
     token?: vscode.CancellationToken,
@@ -294,8 +447,9 @@ export async function processSingleImageTag(
     processedCount?: number,
     totalCount?: number,
     insertionMode?: string,
-    cachedSurroundingText?: string
-): Promise<AltTextResult | void> {
+    cachedSurroundingText?: string,
+    batchOptions?: ImageBatchOptions
+): Promise<AltTextResult | DeferredResolution | void> {
     // Extract tag information
     const tagInfo = await extractTagInfo(editor, selection);
     if (!tagInfo) {
@@ -320,9 +474,9 @@ export async function processSingleImageTag(
         }
     }
 
-    // Check if decorative image
-    if (isDecorativeImage(tagInfo.imageFileName)) {
-        const { newText, altText } = generateDecorativeAlt(tagInfo, insertionMode || 'auto');
+    // Check if decorative image (only for non-dynamic tags — dynamic tags have no resolvable filename)
+    if (!tagInfo.dynamic && isDecorativeImage(tagInfo.imageFileName, batchOptions?.decorativeKeywords)) {
+        const newText = generateDecorativeAlt(tagInfo);
 
         if (insertionMode === 'auto') {
             const success = await safeEditDocument(editor, tagInfo.actualSelection, newText);
@@ -349,124 +503,67 @@ export async function processSingleImageTag(
         }
     }
 
-    // Load image data
+    // Dynamic src cannot be resolved statically — defer to manual resolution.
+    if (tagInfo.dynamic) {
+        return buildDeferred(editor, tagInfo, 'dynamic');
+    }
+
     const imageData = await loadImageData(tagInfo.imageSrc, editor);
-    if (!imageData) {
-        return;
+    if (imageData === 'not-found') {
+        return buildDeferred(editor, tagInfo, 'not-found');
     }
+    if (!imageData) { return; } // hard error already surfaced
 
-    // Get API configuration
-    const apiKey = await context.secrets.get('altGenGemini.geminiApiKey');
-    if (!apiKey) {
-        vscode.window.showErrorMessage('🔑 API key not configured');
-        return;
-    }
+    return generateAndApplyAlt(editor, tagInfo, imageData, selection, token, insertionMode, cachedSurroundingText, batchOptions);
+}
 
-    const config = vscode.workspace.getConfiguration('altGenGemini');
-    const generationMode = config.get<string>('altGenerationMode', 'SEO');
+/** Build a DeferredResolution carrying recognition context (line, snippet). */
+function buildDeferred(
+    editor: vscode.TextEditor,
+    tagInfo: TagInfo,
+    reason: 'dynamic' | 'not-found'
+): DeferredResolution {
+    const line = tagInfo.actualSelection.start.line + 1;
+    const snippet = tagInfo.selectedText.replace(/\s+/g, ' ').trim().slice(0, 120);
+    return {
+        kind: 'needs-manual-resolution',
+        unresolvedSrc: tagInfo.imageSrc,
+        reason,
+        actualSelection: tagInfo.actualSelection,
+        selectedText: tagInfo.selectedText,
+        tagType: tagInfo.tagType,
+        context: { fileName: path.basename(editor.document.uri.fsPath), line, snippet }
+    };
+}
 
-    // Load custom prompts once for all subsequent operations
-    const customPrompts = loadCustomPrompts();
-    const geminiModel = getGeminiApiModel(customPrompts);
+/**
+ * Phase-2: ask the user for a real file, then generate+apply ALT.
+ * `liveSelection` is the deferred tag's current range (offset-adjusted by the caller).
+ * Returns the AltTextResult, or 'skip'/'skip-all' control signals, or void on Esc/error.
+ */
+export async function resolveDeferredImage(
+    editor: vscode.TextEditor,
+    deferred: DeferredResolution,
+    liveSelection: vscode.Selection,
+    wsRoot: string,
+    token: vscode.CancellationToken | undefined,
+    insertionMode: string | undefined,
+    batchOptions: ImageBatchOptions | undefined
+): Promise<AltTextResult | 'skip' | 'skip-all' | void> {
+    const choice = await resolveImagePath(deferred.unresolvedSrc, deferred.reason, deferred.context, wsRoot);
+    if (choice === 'skip-all') { return 'skip-all'; }
+    if (choice === 'skip' || choice === null) { return 'skip'; }
 
-    // Get surrounding text (use cached if available, otherwise extract)
-    // Only extract if custom prompts require it
-    let surroundingText: string | undefined;
-    if (cachedSurroundingText !== undefined) {
-        // Use cached surrounding text for batch processing optimization
-        surroundingText = cachedSurroundingText;
-    } else {
-        // Extract surrounding text only if custom prompts contain {surroundingText} placeholder
-        const promptType = generationMode === 'SEO' ? 'seo' : 'a11y';
-        if (needsSurroundingText(promptType, undefined, customPrompts)) {
-            const contextRange = CONTEXT_RANGE_VALUES.default; // Use default context range
-            surroundingText = extractSurroundingText(editor.document, tagInfo.actualSelection, contextRange);
-        }
-    }
+    const imageData = await loadImageFile(choice);
+    if (!imageData) { return 'skip'; } // SVG/oversize/read error already surfaced
 
-    // Generate ALT text
-    try {
-        if (token?.isCancellationRequested) {
-            return;
-        }
-
-        const altText = await generateAltTextWithRetry(
-            apiKey,
-            imageData.base64Image,
-            imageData.mimeType,
-            generationMode,
-            geminiModel,
-            token,
-            surroundingText,
-            API_CONFIG.MAX_RETRIES
-        );
-
-        if (token?.isCancellationRequested) {
-            return;
-        }
-
-        // Handle DECORATIVE response or empty string literal from API
-        const trimmedAlt = altText.trim();
-        if (trimmedAlt === SPECIAL_KEYWORDS.DECORATIVE || trimmedAlt === '""' || trimmedAlt === '') {
-            const { newText, altText: decorativeAlt } = generateDecorativeAlt(tagInfo, insertionMode || 'auto');
-
-            // Determine the reason for empty alt
-            const reason = trimmedAlt === SPECIAL_KEYWORDS.DECORATIVE
-                ? 'Already described by surrounding text'
-                : 'Decorative image (no meaningful content)';
-
-            if (insertionMode === 'auto') {
-                const success = await safeEditDocument(editor, tagInfo.actualSelection, newText);
-                if (success) {
-                    vscode.window.showInformationMessage(formatMessage('📝 {0} → alt=""', reason));
-                }
-                return {
-                    selection,
-                    altText: formatMessage('{0} → alt=""', reason),
-                    newText,
-                    actualSelection: tagInfo.actualSelection,
-                    success: true,
-                    surroundingText // Return for caching
-                };
-            } else {
-                return {
-                    selection,
-                    altText: formatMessage('{0} → alt=""', reason),
-                    newText,
-                    actualSelection: tagInfo.actualSelection,
-                    success: true,
-                    surroundingText // Return for caching
-                };
-            }
-        }
-
-        // Apply ALT text
-        const newText = applyAltTextToTag(tagInfo.selectedText, altText, tagInfo.tagType);
-
-        if (insertionMode === 'auto') {
-            const success = await safeEditDocument(editor, tagInfo.actualSelection, newText);
-            if (success) {
-                vscode.window.showInformationMessage(formatMessage('✅ ALT: {0}', altText));
-            }
-            return {
-                selection,
-                altText,
-                newText,
-                actualSelection: tagInfo.actualSelection,
-                success: true,
-                surroundingText // Return for caching
-            };
-        } else {
-            return {
-                selection,
-                altText,
-                newText,
-                actualSelection: tagInfo.actualSelection,
-                success: true,
-                surroundingText // Return for caching
-            };
-        }
-    } catch (error) {
-        throw error; // Re-throw to be handled by caller
-    }
+    const tagInfo: TagInfo = {
+        selectedText: deferred.selectedText,
+        actualSelection: liveSelection,
+        imageSrc: choice,
+        imageFileName: path.basename(choice),
+        tagType: deferred.tagType,
+        dynamic: false
+    };
+    return generateAndApplyAlt(editor, tagInfo, imageData, liveSelection, token, insertionMode, undefined, batchOptions);
 }
