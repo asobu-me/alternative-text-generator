@@ -393,9 +393,14 @@ async function processMultipleTags(
                                     return;
                                 }
 
-                                // Update offset delta after edit
-                                const newTextLength = result.newText.length;
-                                cumulativeOffsetDelta += (newTextLength - replacedLength);
+                                // Update offset delta only when an edit actually occurred.
+                                // 'Skip' returns shouldContinue=true without editing, so the
+                                // delta must NOT advance (otherwise later tags — including
+                                // deferred items — drift).
+                                if (choice === 'Insert') {
+                                    const newTextLength = result.newText.length;
+                                    cumulativeOffsetDelta += (newTextLength - replacedLength);
+                                }
                             } else if (result && insertionMode === 'auto') {
                                 // Auto mode already edited, calculate offset delta
                                 // Note: In auto mode, safeEditDocument was already called in processSingleImageTag
@@ -604,9 +609,12 @@ async function generateAltForImages(
                     if (isDeferredResolution(result)) {
                         // DeferredResolution: image src is dynamic or its file is missing.
                         // Collect for phase-2 (do NOT edit / count here).
+                        // NOTE: this is the cursor path — `off.startOffset` is the cursor
+                        // position, not the tag start. extractTagInfo expands to the full tag,
+                        // so use the live (already offset-adjusted) tag start from actualSelection.
                         deferredImages.push({
                             item: result,
-                            liveStartOffset: off.startOffset + cumulativeOffsetDelta,
+                            liveStartOffset: editor.document.offsetAt(result.actualSelection.start),
                             liveLength: result.selectedText.length
                         });
                         processedCount++;
