@@ -53,8 +53,6 @@ function scoreCandidate(query: string, candidatePath: string): number {
     if (name.includes(q) || q.includes(name)) {
         return 500 + Math.max(0, 100 - Math.abs(name.length - q.length));
     }
-    const tokens = name.split(/[-_.\s]+/);
-    if (tokens.includes(q)) { return 400; }
     const dist = levenshtein(name, q);
     const maxLen = Math.max(name.length, q.length) || 1;
     return Math.round((1 - dist / maxLen) * 300);
@@ -101,10 +99,15 @@ const BROWSE_ID = '__browse__';
 const SKIP_ID = '__skip__';
 const SKIP_ALL_ID = '__skip_all__';
 
+/** QuickPick item carrying a required `id` (candidate fsPath or a sentinel). */
+interface ResolverPickItem extends vscode.QuickPickItem {
+    readonly id: string;
+}
+
 /** True if `target` resolves inside `wsRoot` (no traversal, not absolute-outside). */
 function isInsideWorkspace(target: string, wsRoot: string): boolean {
     const rel = path.relative(wsRoot, target);
-    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+    return !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 /**
@@ -128,7 +131,7 @@ export async function resolveImagePath(
 
     const reasonLabel = reason === 'dynamic' ? 'Dynamic src' : 'File not found';
 
-    const items: Array<vscode.QuickPickItem & { id?: string }> = ranked.map(p => ({
+    const items: ResolverPickItem[] = ranked.map(p => ({
         id: p,
         label: path.basename(p),
         description: path.relative(wsRoot, p)
@@ -154,22 +157,25 @@ export async function resolveImagePath(
 
     let chosenPath: string;
     if (picked.id === BROWSE_ID) {
-        const uris = await vscode.window.showOpenDialog({
-            canSelectMany: false,
-            openLabel: 'Use for ALT generation',
-            defaultUri: vscode.Uri.file(wsRoot),
-            filters: { Images: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'] }
-        });
-        const browsedPath = uris && uris[0] ? uris[0].fsPath : undefined;
-        if (!browsedPath) { return null; } // dialog cancelled
-        if (!isInsideWorkspace(browsedPath, wsRoot)) {
+        // Loop the dialog until a valid in-workspace file is chosen or the user cancels.
+        for (;;) {
+            const uris = await vscode.window.showOpenDialog({
+                canSelectMany: false,
+                openLabel: 'Use for ALT generation',
+                defaultUri: vscode.Uri.file(wsRoot),
+                filters: { Images: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif'] }
+            });
+            const browsedPath = uris && uris[0] ? uris[0].fsPath : undefined;
+            if (!browsedPath) { return null; } // dialog cancelled
+            if (isInsideWorkspace(browsedPath, wsRoot)) {
+                chosenPath = browsedPath;
+                break;
+            }
             vscode.window.showErrorMessage('🚫 File must be inside the workspace.');
-            return resolveImagePath(unresolvedSrc, reason, context, wsRoot); // re-prompt
         }
-        chosenPath = browsedPath;
     } else {
-        // A ranked candidate — picked.id is always a string here (not BROWSE_ID/SKIP_ID/SKIP_ALL_ID)
-        chosenPath = picked.id as string;
+        // A ranked candidate — picked.id is the candidate fsPath.
+        chosenPath = picked.id;
     }
 
     sessionMappings.set(unresolvedSrc, chosenPath);

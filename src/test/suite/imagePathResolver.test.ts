@@ -18,6 +18,12 @@ suite('imagePathResolver', () => {
         test('keeps underscores and digits from a filename', () => {
             assert.strictEqual(extractQueryToken('photos/IMG_1234.JPG'), 'IMG_1234');
         });
+        test('returns empty string for empty input', () => {
+            assert.strictEqual(extractQueryToken(''), '');
+        });
+        test('returns empty string for an empty template literal', () => {
+            assert.strictEqual(extractQueryToken('${}'), '');
+        });
     });
 
     suite('levenshtein', () => {
