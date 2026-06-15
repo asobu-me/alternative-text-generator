@@ -10,8 +10,15 @@ import { CancellationError } from './utils/errors';
 import { createContextCache } from './utils/contextGrouping';
 
 // Services
-import { processSingleImageTag } from './services/imageProcessor';
+import { processSingleImageTag, resolveDeferredImage, DeferredResolution } from './services/imageProcessor';
+import { resetResolverCache } from './services/imagePathResolver';
 import { processSingleVideoTag } from './services/videoProcessor';
+
+/** Type guard: true when an image result requires phase-2 manual resolution. */
+function isDeferredResolution(value: unknown): value is DeferredResolution {
+    return typeof value === 'object' && value !== null
+        && (value as { kind?: unknown }).kind === 'needs-manual-resolution';
+}
 
 // Core
 import { needsSurroundingText } from './core/prompts';
@@ -193,6 +200,61 @@ async function handleUserChoice(
     return true;
 }
 
+/**
+ * Resolve deferred (dynamic / not-found) image tags after the main pass.
+ * Items are sorted ascending by their live start offset; a local delta keeps
+ * later items' ranges correct as earlier ones are edited. Identical
+ * unresolvedSrc values are auto-resolved by the session cache (asked once).
+ * Returns the number of successfully resolved items.
+ */
+async function runDeferredResolutionPhase(
+    editor: vscode.TextEditor,
+    deferred: Array<{ item: DeferredResolution; liveStartOffset: number; liveLength: number }>,
+    wsRoot: string,
+    token: vscode.CancellationToken,
+    insertionMode: string,
+    batchOptions: { generationMode: string; decorativeKeywords: string[] }
+): Promise<number> {
+    let resolvedCount = 0;
+    let phase2Delta = 0;
+    const ordered = [...deferred].sort((a, b) => a.liveStartOffset - b.liveStartOffset);
+
+    for (const entry of ordered) {
+        if (token.isCancellationRequested) { break; }
+
+        const start = editor.document.positionAt(entry.liveStartOffset + phase2Delta);
+        const end = editor.document.positionAt(entry.liveStartOffset + phase2Delta + entry.liveLength);
+        const liveSelection = new vscode.Selection(start, end);
+
+        const result = await resolveDeferredImage(
+            editor, entry.item, liveSelection, wsRoot, token, insertionMode, batchOptions
+        );
+
+        if (result === 'skip-all') { break; }
+        if (result === 'skip' || !result) { continue; }
+
+        // result is an AltTextResult
+        if (insertionMode === 'confirm') {
+            const replacedLen = entry.liveLength;
+            const choice = await vscode.window.showInformationMessage(
+                `✅ ALT: ${result.altText}`, 'Insert', 'Skip'
+            );
+            if (choice === 'Insert') {
+                const ok = await safeEditDocument(editor, liveSelection, result.newText);
+                if (ok) {
+                    phase2Delta += (result.newText.length - replacedLen);
+                    resolvedCount++;
+                }
+            }
+        } else {
+            // auto mode: resolveDeferredImage already edited the document
+            phase2Delta += (result.newText.length - entry.liveLength);
+            resolvedCount++;
+        }
+    }
+    return resolvedCount;
+}
+
 // Process multiple tags (mixed img and video tags)
 async function processMultipleTags(
     editor: vscode.TextEditor,
@@ -236,6 +298,9 @@ async function processMultipleTags(
 
         // Track offset changes to adjust subsequent tag ranges after edits
         let cumulativeOffsetDelta = 0;
+
+        // Deferred (dynamic / not-found) image tags collected for phase-2 resolution
+        const deferredImages: Array<{ item: DeferredResolution; liveStartOffset: number; liveLength: number }> = [];
 
         // Store original offsets for all tags before any edits
         const tagOffsets = allTags.map(tag => ({
@@ -283,35 +348,41 @@ async function processMultipleTags(
                     if (isImageTag) {
                         const result = await processSingleImageTag(editor, selection, token, progress, processedCount, totalCount, insertionMode, cachedContext, imageBatchOptions);
 
-                        // Task 6 will handle phase-2 deferred resolution — skip for now.
-                        if (result && 'kind' in result && result.kind === 'needs-manual-resolution') {
-                            // DeferredResolution: image could not be resolved statically.
-                            // Collected and handled in batch phase-2 (Task 6).
+                        if (isDeferredResolution(result)) {
+                            // DeferredResolution: image src is dynamic or its file is missing.
+                            // Collect for phase-2 (do NOT edit / count here). Captures the
+                            // already-offset-adjusted start; later phase-1 edits sit at higher
+                            // offsets and don't shift this tag.
+                            deferredImages.push({
+                                item: result,
+                                liveStartOffset: adjustedStartOffset,
+                                liveLength: result.selectedText.length
+                            });
                         } else {
+                            // result narrows to AltTextResult | undefined here.
                             // Count success/failure
-                            if (result && (result as {success?: boolean}).success !== false) {
+                            if (result && result.success !== false) {
                                 successCount++;
                             } else if (!result) {
                                 failureCount++;
                             }
 
                             if (result && insertionMode === 'confirm') {
-                                const altResult = result as {altText: string; actualSelection: vscode.Selection; newText: string};
                                 // Calculate replaced length BEFORE edit
-                                const replacedStartOffset = editor.document.offsetAt(altResult.actualSelection.start);
-                                const replacedEndOffset = editor.document.offsetAt(altResult.actualSelection.end);
+                                const replacedStartOffset = editor.document.offsetAt(result.actualSelection.start);
+                                const replacedEndOffset = editor.document.offsetAt(result.actualSelection.end);
                                 const replacedLength = replacedEndOffset - replacedStartOffset;
 
                                 const choice = await showConfirmationDialog(
-                                    `✅ ALT: ${altResult.altText}`,
+                                    `✅ ALT: ${result.altText}`,
                                     totalCount
                                 );
 
                                 const shouldContinue = await handleUserChoice(
                                     choice,
                                     editor,
-                                    altResult.actualSelection,
-                                    altResult.newText,
+                                    result.actualSelection,
+                                    result.newText,
                                     processedCount,
                                     totalCount
                                 );
@@ -321,14 +392,14 @@ async function processMultipleTags(
                                 }
 
                                 // Update offset delta after edit
-                                const newTextLength = altResult.newText.length;
+                                const newTextLength = result.newText.length;
                                 cumulativeOffsetDelta += (newTextLength - replacedLength);
                             } else if (result && insertionMode === 'auto') {
                                 // Auto mode already edited, calculate offset delta
                                 // Note: In auto mode, safeEditDocument was already called in processSingleImageTag
                                 // We need to calculate the replaced length based on original vs new text
                                 const replacedLength = originalLength; // Use original tag length
-                                const newTextLength = (result as {newText: string}).newText.length;
+                                const newTextLength = result.newText.length;
                                 cumulativeOffsetDelta += (newTextLength - replacedLength);
                             }
                         }
@@ -405,6 +476,22 @@ async function processMultipleTags(
             contextCache?.clear();
         }
 
+        // Phase 2: resolve deferred (dynamic / not-found) image tags
+        if (deferredImages.length > 0 && !token.isCancellationRequested) {
+            const wsFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+            if (wsFolder) {
+                vscode.window.showInformationMessage(
+                    formatMessage('✋ {0} image(s) need a file selection', deferredImages.length)
+                );
+                const resolved = await runDeferredResolutionPhase(
+                    editor, deferredImages, wsFolder.uri.fsPath, token, insertionMode,
+                    { generationMode, decorativeKeywords }
+                );
+                successCount += resolved;
+            }
+        }
+        resetResolverCache();
+
         // Display completion message (only for multiple items)
         if (totalCount > 1) {
             const imgCount = imgTags.length;
@@ -453,6 +540,9 @@ async function generateAltForImages(
             let lastSurroundingText: string | undefined;
             let lastSelectionLine: number | undefined;
 
+            // Deferred (dynamic / not-found) image tags collected for phase-2 resolution
+            const deferredImages: Array<{ item: DeferredResolution; liveStartOffset: number; liveLength: number }> = [];
+
             for (const selection of selections) {
                 // Check for cancellation
                 if (token?.isCancellationRequested) {
@@ -482,47 +572,54 @@ async function generateAltForImages(
                         imageBatchOptions
                     );
 
+                    // Deferred check FIRST so the cast-free narrowing works below.
+                    if (isDeferredResolution(result)) {
+                        // DeferredResolution: image src is dynamic or its file is missing.
+                        // Collect for phase-2 (do NOT edit / count here).
+                        deferredImages.push({
+                            item: result,
+                            liveStartOffset: editor.document.offsetAt(result.actualSelection.start),
+                            liveLength: result.selectedText.length
+                        });
+                        processedCount++;
+                        continue;
+                    }
+
+                    // result narrows to AltTextResult | undefined from here.
                     // Update cache for next iteration
-                    if (result && 'surroundingText' in result) {
-                        lastSurroundingText = (result as any).surroundingText;
+                    if (result && result.surroundingText !== undefined) {
+                        lastSurroundingText = result.surroundingText;
                         lastSelectionLine = currentLine;
                     }
 
-                    // Task 6 will handle phase-2 deferred resolution — skip for now.
-                    if (result && 'kind' in result && result.kind === 'needs-manual-resolution') {
-                        // DeferredResolution: image could not be resolved statically.
-                        // Collected and handled in batch phase-2 (Task 6).
-                    } else {
-                        // Count success/failure
-                        if (result && (result as {success?: boolean}).success !== false) {
-                            successCount++;
-                        } else if (!result) {
-                            // Void returned (error or cancellation)
-                            failureCount++;
-                        }
+                    // Count success/failure
+                    if (result && result.success !== false) {
+                        successCount++;
+                    } else if (!result) {
+                        // Void returned (error or cancellation)
+                        failureCount++;
+                    }
 
-                        if (result) {
-                            const altResult = result as {altText: string; actualSelection: vscode.Selection; newText: string};
-                            if (insertionMode === 'confirm') {
-                                // Show confirmation dialog for each image immediately
-                                // Single item: show only Insert and Cancel (no Skip)
-                                const choice = await vscode.window.showInformationMessage(
-                                    `✅ ALT: ${altResult.altText}`,
-                                    'Insert',
-                                    'Cancel'
-                                );
+                    if (result) {
+                        if (insertionMode === 'confirm') {
+                            // Show confirmation dialog for each image immediately
+                            // Single item: show only Insert and Cancel (no Skip)
+                            const choice = await vscode.window.showInformationMessage(
+                                `✅ ALT: ${result.altText}`,
+                                'Insert',
+                                'Cancel'
+                            );
 
-                                if (choice === 'Insert') {
-                                    const success = await safeEditDocument(editor, altResult.actualSelection, altResult.newText);
-                                    if (!success) {
-                                        return;
-                                    }
-                                } else if (choice === 'Cancel') {
-                                    vscode.window.showWarningMessage(formatMessage('⏸️ Cancelled ({0}/{1} processed)', processedCount + 1, totalCount));
+                            if (choice === 'Insert') {
+                                const success = await safeEditDocument(editor, result.actualSelection, result.newText);
+                                if (!success) {
                                     return;
                                 }
-                                // If 'Skip', continue to next image
+                            } else if (choice === 'Cancel') {
+                                vscode.window.showWarningMessage(formatMessage('⏸️ Cancelled ({0}/{1} processed)', processedCount + 1, totalCount));
+                                return;
                             }
+                            // If 'Skip', continue to next image
                         }
                     }
                 } catch (error) {
@@ -538,6 +635,21 @@ async function generateAltForImages(
 
                 processedCount++;
             }
+
+            // Phase 2: resolve deferred (dynamic / not-found) image tags
+            if (deferredImages.length > 0 && !token.isCancellationRequested) {
+                const wsFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+                if (wsFolder) {
+                    vscode.window.showInformationMessage(
+                        formatMessage('✋ {0} image(s) need a file selection', deferredImages.length)
+                    );
+                    successCount += await runDeferredResolutionPhase(
+                        editor, deferredImages, wsFolder.uri.fsPath, token, insertionMode,
+                        { generationMode, decorativeKeywords }
+                    );
+                }
+            }
+            resetResolverCache();
 
             // Display completion message
             if (totalCount > 1) {
