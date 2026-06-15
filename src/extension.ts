@@ -237,8 +237,9 @@ async function runDeferredResolutionPhase(
         if (insertionMode === 'confirm') {
             const replacedLen = entry.liveLength;
             const choice = await vscode.window.showInformationMessage(
-                `✅ ALT: ${result.altText}`, 'Insert', 'Skip'
+                `✅ ALT: ${result.altText}`, 'Insert', 'Skip', 'Cancel'
             );
+            if (choice === 'Cancel') { break; }   // abort remaining deferred resolutions
             if (choice === 'Insert') {
                 const ok = await safeEditDocument(editor, liveSelection, result.newText);
                 if (ok) {
@@ -246,6 +247,7 @@ async function runDeferredResolutionPhase(
                     resolvedCount++;
                 }
             }
+            // 'Skip' or dismissed (Esc) → leave unchanged, continue
         } else {
             // auto mode: resolveDeferredImage already edited the document
             phase2Delta += (result.newText.length - entry.liveLength);
@@ -477,20 +479,30 @@ async function processMultipleTags(
         }
 
         // Phase 2: resolve deferred (dynamic / not-found) image tags
+        let resolvedDeferred = 0;
         if (deferredImages.length > 0 && !token.isCancellationRequested) {
             const wsFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
             if (wsFolder) {
                 vscode.window.showInformationMessage(
                     formatMessage('✋ {0} image(s) need a file selection', deferredImages.length)
                 );
-                const resolved = await runDeferredResolutionPhase(
+                resolvedDeferred = await runDeferredResolutionPhase(
                     editor, deferredImages, wsFolder.uri.fsPath, token, insertionMode,
                     { generationMode, decorativeKeywords }
                 );
-                successCount += resolved;
+                successCount += resolvedDeferred;
             }
         }
         resetResolverCache();
+
+        // Surface deferred items the user skipped (Skip / Skip all / Esc / Cancel),
+        // or all of them if phase 2 couldn't run (missing workspace folder).
+        const deferredSkipped = deferredImages.length - resolvedDeferred;
+        if (deferredSkipped > 0) {
+            vscode.window.showWarningMessage(
+                formatMessage('⚠️ {0} image(s) skipped (no file selected)', deferredSkipped)
+            );
+        }
 
         // Display completion message (only for multiple items)
         if (totalCount > 1) {
@@ -543,12 +555,28 @@ async function generateAltForImages(
             // Deferred (dynamic / not-found) image tags collected for phase-2 resolution
             const deferredImages: Array<{ item: DeferredResolution; liveStartOffset: number; liveLength: number }> = [];
 
-            for (const selection of selections) {
+            // Pre-capture original offsets for every selection (document is unedited here).
+            // Mirrors processMultipleTags so later edits don't invalidate ranges/offsets.
+            const selectionOffsets = selections.map(s => ({
+                startOffset: editor.document.offsetAt(s.start),
+                endOffset: editor.document.offsetAt(s.end),
+                originalLength: editor.document.getText(s).length
+            }));
+            let cumulativeOffsetDelta = 0;
+
+            for (let i = 0; i < selections.length; i++) {
                 // Check for cancellation
                 if (token?.isCancellationRequested) {
                     vscode.window.showWarningMessage(formatMessage('⏸️ Cancelled ({0}/{1} processed)', processedCount, totalCount));
                     return;
                 }
+
+                // Rebuild the live selection from the adjusted offset (earlier phase-1
+                // edits shift later tags). Pass THIS, not the stale static selection.
+                const off = selectionOffsets[i];
+                const adjustedStart = editor.document.positionAt(off.startOffset + cumulativeOffsetDelta);
+                const adjustedEnd = editor.document.positionAt(off.endOffset + cumulativeOffsetDelta);
+                const selection = new vscode.Selection(adjustedStart, adjustedEnd);
 
                 try {
                     // Determine if we can reuse cached surrounding text
@@ -578,7 +606,7 @@ async function generateAltForImages(
                         // Collect for phase-2 (do NOT edit / count here).
                         deferredImages.push({
                             item: result,
-                            liveStartOffset: editor.document.offsetAt(result.actualSelection.start),
+                            liveStartOffset: off.startOffset + cumulativeOffsetDelta,
                             liveLength: result.selectedText.length
                         });
                         processedCount++;
@@ -615,11 +643,17 @@ async function generateAltForImages(
                                 if (!success) {
                                     return;
                                 }
+                                // Document changed: advance delta so later tags stay aligned.
+                                cumulativeOffsetDelta += (result.newText.length - off.originalLength);
                             } else if (choice === 'Cancel') {
                                 vscode.window.showWarningMessage(formatMessage('⏸️ Cancelled ({0}/{1} processed)', processedCount + 1, totalCount));
                                 return;
                             }
                             // If 'Skip', continue to next image
+                        } else {
+                            // Auto mode: processSingleImageTag already edited the document.
+                            // Advance delta so later tags / deferred offsets stay aligned.
+                            cumulativeOffsetDelta += (result.newText.length - off.originalLength);
                         }
                     }
                 } catch (error) {
@@ -637,19 +671,30 @@ async function generateAltForImages(
             }
 
             // Phase 2: resolve deferred (dynamic / not-found) image tags
+            let resolvedDeferred = 0;
             if (deferredImages.length > 0 && !token.isCancellationRequested) {
                 const wsFolder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
                 if (wsFolder) {
                     vscode.window.showInformationMessage(
                         formatMessage('✋ {0} image(s) need a file selection', deferredImages.length)
                     );
-                    successCount += await runDeferredResolutionPhase(
+                    resolvedDeferred = await runDeferredResolutionPhase(
                         editor, deferredImages, wsFolder.uri.fsPath, token, insertionMode,
                         { generationMode, decorativeKeywords }
                     );
+                    successCount += resolvedDeferred;
                 }
             }
             resetResolverCache();
+
+            // Surface deferred items the user skipped (Skip / Skip all / Esc / Cancel),
+            // or all of them if phase 2 couldn't run (missing workspace folder).
+            const deferredSkipped = deferredImages.length - resolvedDeferred;
+            if (deferredSkipped > 0) {
+                vscode.window.showWarningMessage(
+                    formatMessage('⚠️ {0} image(s) skipped (no file selected)', deferredSkipped)
+                );
+            }
 
             // Display completion message
             if (totalCount > 1) {
