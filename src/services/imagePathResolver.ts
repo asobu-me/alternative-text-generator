@@ -163,7 +163,7 @@ export async function resolveImagePath(
         const browsedPath = uris && uris[0] ? uris[0].fsPath : undefined;
         if (!browsedPath) { return null; } // dialog cancelled
         if (!isInsideWorkspace(browsedPath, wsRoot)) {
-            vscode.window.showErrorMessage('File must be inside the workspace.');
+            vscode.window.showErrorMessage('🚫 File must be inside the workspace.');
             return resolveImagePath(unresolvedSrc, reason, context, wsRoot); // re-prompt
         }
         chosenPath = browsedPath;
