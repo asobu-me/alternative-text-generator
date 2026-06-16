@@ -1,0 +1,16 @@
+name = "alt-gen-proxy"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# --- Optional: per-IP rate limiting via Workers KV ---------------------------
+# The Worker enforces a rate limit only when a KV namespace named RATE_LIMIT is
+# bound. To enable it:
+#   1) npx wrangler kv namespace create RATE_LIMIT
+#   2) Paste the printed id below and uncomment this block:
+#
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT"
+# id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
+#
+# Alternatively, leave this off and add a Cloudflare "Rate limiting rule" in the
+# dashboard (zero code, also on the free plan).

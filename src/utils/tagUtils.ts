@@ -3,7 +3,6 @@
  */
 
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { TAG_DETECTION } from '../constants';
 
 /**
@@ -198,34 +197,4 @@ export function detectAllTags(
     }
 
     return tags;
-}
-
-/**
- * Extract image filename from img/Image tag
- */
-export function extractImageFileName(tagText: string): string {
-    // 通常の引用符形式を試行
-    let match = tagText.match(/src=(["'])([^"']+)\1/);
-    if (match) {
-        return path.basename(match[2]);
-    }
-
-    // JSX形式を試行
-    const jsxMatch = tagText.match(/src=\{["']?([^"'}]+)["']?\}/);
-    if (jsxMatch) {
-        return path.basename(jsxMatch[1]);
-    }
-
-    return 'unknown';
-}
-
-/**
- * Extract video filename from video tag
- */
-export function extractVideoFileName(tagText: string): string {
-    const match = tagText.match(/src=["']([^"']+)["']/);
-    if (match) {
-        return path.basename(match[1]);
-    }
-    return 'unknown';
 }

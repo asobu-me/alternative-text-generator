@@ -5,6 +5,7 @@ import { safeEditDocument } from './utils/security';
 import { formatMessage } from './utils/textUtils';
 import { detectTagType, detectAllTags } from './utils/tagUtils';
 import { getInsertionMode, clearOutputLanguageCache } from './utils/config';
+import { initApiKeyStore, setUserApiKey, clearUserApiKey, getUserApiKey } from './utils/apiKey';
 import { getUserFriendlyErrorMessage } from './utils/errorHandler';
 import { CancellationError } from './utils/errors';
 import { createContextCache } from './utils/contextGrouping';
@@ -27,6 +28,10 @@ import { needsSurroundingText } from './core/prompts';
 import { SELECTION_THRESHOLDS, BATCH_PROCESSING, CONTEXT_RANGE_VALUES } from './constants';
 
 export async function activate(context: vscode.ExtensionContext) {
+    // Initialize the user API key store (SecretStorage). Must run before any
+    // generation command so Bring-Your-Own-Key routing works.
+    initApiKeyStore(context);
+
     // Watch for configuration changes
     const configWatcher = vscode.workspace.onDidChangeConfiguration(async (e) => {
         // Clear output language cache when output language setting changes
@@ -35,6 +40,52 @@ export async function activate(context: vscode.ExtensionContext) {
         }
     });
     context.subscriptions.push(configWatcher);
+
+    // Command: set your own Gemini API key (stored in SecretStorage).
+    // With a key set, requests go directly to Google using your free/paid quota
+    // instead of the shared bundled proxy.
+    const setKeyDisposable = vscode.commands.registerCommand('auto-alt-writer.setApiKey', async () => {
+        const hasKey = (await getUserApiKey()) !== undefined;
+        const key = await vscode.window.showInputBox({
+            title: 'Auto ALT Writer: Set your Gemini API key',
+            prompt: hasKey
+                ? 'A key is already set. Enter a new key to replace it (get one from Google AI Studio).'
+                : 'Enter your Gemini API key (get one from Google AI Studio). Leave empty to cancel.',
+            placeHolder: 'AIza...',
+            password: true,
+            ignoreFocusOut: true,
+            validateInput: (value) => {
+                const trimmed = value.trim();
+                if (trimmed.length === 0) {
+                    return null; // empty = cancel, handled below
+                }
+                return trimmed.length < 20 ? 'That does not look like a valid API key.' : null;
+            }
+        });
+
+        // Undefined (Esc) or empty input → cancel without changing anything.
+        if (key === undefined || key.trim().length === 0) {
+            return;
+        }
+
+        await setUserApiKey(key);
+        vscode.window.showInformationMessage(
+            '🔑 Gemini API key saved. Requests now use your own key (direct to Google).'
+        );
+    });
+    context.subscriptions.push(setKeyDisposable);
+
+    // Command: remove the stored key and revert to the shared proxy.
+    const clearKeyDisposable = vscode.commands.registerCommand('auto-alt-writer.clearApiKey', async () => {
+        const hasKey = (await getUserApiKey()) !== undefined;
+        if (!hasKey) {
+            vscode.window.showInformationMessage('No personal API key is set. Already using the shared free tier.');
+            return;
+        }
+        await clearUserApiKey();
+        vscode.window.showInformationMessage('🗑️ Personal API key removed. Reverted to the shared free tier.');
+    });
+    context.subscriptions.push(clearKeyDisposable);
 
     // Smart ALT/aria-label generation command (auto-detect tag type)
     const disposable = vscode.commands.registerCommand('auto-alt-writer.generateAlt', async () => {

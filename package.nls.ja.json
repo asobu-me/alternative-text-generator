@@ -1,35 +1,36 @@
 {
-  "displayName": "ALT Generator with Gemini",
-  "description": "Gemini APIを使用してimgタグのALT属性を自動生成(HTML/PHP/JSX/TSXの静的パスに対応)",
+  "displayName": "Auto ALT Writer",
+  "description": "Gemini APIでalt属性とaria-labelを自動生成・挿入。文脈に応じて内容を判断し、装飾画像は空に(HTML/PHP/JSX/TSXの静的パスに対応)",
 
-  "command.generateAlt": "ALT Generator: 画像の代替テキスト(ALT)を生成",
-  "command.generateVideoAriaLabel": "ALT Generator: 動画のUIラベル(ARIA-LABEL)または書き起こしテキストを生成",
-  "command.setApiKey": "ALT Generator: Gemini APIキーを入力",
-  "command.clearApiKey": "ALT Generator: Gemini APIキーをクリア",
+  "command.generateAlt": "Auto ALT Writer: 画像の代替テキスト(ALT)を生成",
+  "command.generateVideoAriaLabel": "Auto ALT Writer: 動画のUIラベル(ARIA-LABEL)または書き起こしテキストを生成",
+  "command.setApiKey": "Auto ALT Writer: 自分のGemini APIキーを設定(自分の枠を使用)",
+  "command.clearApiKey": "Auto ALT Writer: 自分のGemini APIキーを削除(共有の無料枠を使用)",
 
-  "config.altGenerationMode.description": "ALT生成モード",
+  "config.altGenerationMode.description": "[画像] 何を重視してALTを生成するかを設定します。",
   "config.altGenerationMode.markdownDescription": "[画像] 何を重視してALTを生成するかを設定します。",
   "config.altGenerationMode.enum.seo": "SEO: 検索エンジン最適化(SEO)に焦点を当てたALTを生成します",
   "config.altGenerationMode.enum.a11y": "A11Y: アクセシビリティ(A11Y)向上に焦点を当てたALTを生成します",
 
-  "config.insertionMode.description": "生成されたテキストを、どのように挿入するかを設定します",
-  "config.insertionMode.markdownDescription": "生成されたテキストを、どのように挿入するかを設定します。",
-  "config.insertionMode.enum.auto": "自動: 生成されたテキストを自動で挿入します",
-  "config.insertionMode.enum.confirm": "手動: 生成されたテキストの内容を確認した後に手動で挿入します",
+  "config.decorativeKeywords.description": "[画像] ファイル名にこれらのキーワードが含まれている場合、装飾目的と判定し、ALTを空に設定します。",
+  "config.decorativeKeywords.markdownDescription": "[画像] ファイル名にこれらのキーワードが含まれている場合、装飾目的と判定し、ALTを空(`alt=\"\"`)に設定します。",
 
-  "config.outputLanguage.description": "生成するテキストの言語を設定します",
-
-  "config.decorativeKeywords.description": "装飾画像キーワード",
-  "config.decorativeKeywords.markdownDescription": "ファイル名にこれらのキーワードが含まれている場合、装飾目的と判定し、ALTを空(`alt=\"\"`)に設定します。",
-
-  "config.contextAnalysisEnabled.description": "周辺テキストを分析して重複を防止",
-  "config.contextAnalysisEnabled.markdownDescription": "画像や動画の周辺テキストを分析します。既に周辺テキストで説明されている場合は、自動で `alt=\"\"` に設定し、スクリーンリーダーでの重複読み上げを防止します。",
-
-  "config.videoDescriptionMode.description": "動画説明モード",
+  "config.videoDescriptionMode.description": "[動画] 生成するテキストの詳細度を設定します。",
   "config.videoDescriptionMode.markdownDescription": "[動画] 生成するテキストの詳細度を設定します。Transcriptモードは音声解説を作成する際のテキスト原稿などにご利用ください。",
   "config.videoDescriptionMode.enum.summary": "Summary: 動画を再生する前に、それが何かを識別するための簡潔なラベル",
   "config.videoDescriptionMode.enum.transcript": "Transcript: 動画の内容を完全に理解するために、視覚情報も含む書き起こし",
 
-  "config.customFilePath.description": "カスタムファイルのパス",
-  "config.customFilePath.markdownDescription": "GeminiのプロンプトやAPIモデルをカスタマイズするMarkdownファイルへのパスを記述します。ワークスペースルートからの相対パスで指定します。  \n\n**例:** `.vscode/custom-prompts.md`"
+  "config.outputLanguage.description": "[共通] 生成するテキストの言語を設定します。",
+  "config.outputLanguage.markdownDescription": "[共通] 生成するテキストの言語を設定します。",
+
+  "config.insertionMode.description": "[共通] 生成されたテキストをどのように挿入するかを設定します。",
+  "config.insertionMode.markdownDescription": "[共通] 生成されたテキストをどのように挿入するかを設定します。",
+  "config.insertionMode.enum.auto": "自動: 生成されたテキストを自動で挿入します",
+  "config.insertionMode.enum.confirm": "手動: 生成されたテキストの内容を確認した後に手動で挿入します",
+
+  "config.contextAnalysisEnabled.description": "[共通] 周辺テキストを分析し、スクリーンリーダーでの重複読み上げを防止します。",
+  "config.contextAnalysisEnabled.markdownDescription": "[共通] 画像や動画の周辺テキストを分析します。既に周辺テキストで説明されている場合は、自動で `alt=\"\"` に設定し、スクリーンリーダーでの重複読み上げを防止します。",
+
+  "config.customFilePath.description": "[上級] GeminiのプロンプトやAPIモデルをカスタマイズするMarkdownファイルへのパス(ワークスペースルートからの相対パス)。",
+  "config.customFilePath.markdownDescription": "[上級] GeminiのプロンプトやAPIモデルをカスタマイズするMarkdownファイルへのパスを記述します。ワークスペースルートからの相対パスで指定します。  \n\n**例:** `.vscode/custom-prompts.md`"
 }

@@ -19,7 +19,7 @@ let cachedOutputLanguageSetting: string | null = null;
  * Memoized to avoid redundant config reads
  */
 export function getOutputLanguage(): string {
-    const config = vscode.workspace.getConfiguration('altGenGemini');
+    const config = vscode.workspace.getConfiguration('autoAltWriter');
     const langSetting = config.get<string>('outputLanguage', 'auto');
 
     // Return cached result if setting hasn't changed
@@ -56,11 +56,11 @@ export function clearOutputLanguageCache(): void {
  * Returns 'auto' or 'confirm', defaults to 'auto' for invalid values
  */
 export function getInsertionMode(): InsertionMode {
-    const config = vscode.workspace.getConfiguration('altGenGemini');
+    const config = vscode.workspace.getConfiguration('autoAltWriter');
     const mode = config.get<string>('insertionMode', 'auto');
 
     if (mode !== 'auto' && mode !== 'confirm') {
-        console.warn(`[ALT Generator] Invalid insertionMode: ${mode}, using 'auto'`);
+        console.warn(`[Auto ALT Writer] Invalid insertionMode: ${mode}, using 'auto'`);
         return 'auto';
     }
 

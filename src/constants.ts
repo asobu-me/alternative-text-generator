@@ -15,6 +15,8 @@ export const API_CONFIG = {
     RETRY_WAIT_BASE_MS: 1000,
     /** Maximum video file size in MB */
     MAX_VIDEO_SIZE_MB: 20,
+    /** Maximum image file size in MB */
+    MAX_IMAGE_SIZE_MB: 20,
 } as const;
 
 /**
@@ -99,16 +101,6 @@ export const JSON_FORMATTING = {
 } as const;
 
 /**
- * UI Messages
- */
-export const UI_MESSAGES = {
-    /** Prefix for image progress messages */
-    IMAGE_PREFIX: '[IMG]',
-    /** Prefix for video progress messages */
-    VIDEO_PREFIX: '[VIDEO]',
-} as const;
-
-/**
  * Context Range Values
  * Mapping from configuration string to actual character count
  */
@@ -129,18 +121,6 @@ export const SPECIAL_KEYWORDS = {
 } as const;
 
 /**
- * API Key Masking Configuration
- */
-export const MASKING = {
-    /** Masked character for API key display */
-    MASK_CHAR: '••••••••',
-    /** Number of characters to show from end of API key (0 for maximum security) */
-    VISIBLE_CHARS: 4,
-    /** Minimum API key length to show last characters */
-    MIN_LENGTH_FOR_VISIBLE: 4,
-} as const;
-
-/**
  * Batch Processing Configuration
  */
 export const BATCH_PROCESSING = {
@@ -149,48 +129,34 @@ export const BATCH_PROCESSING = {
 } as const;
 
 /**
- * HTML Elements Configuration
+ * Proxy Configuration
+ *
+ * The Gemini API key is NEVER shipped with the extension. All requests go
+ * through a thin server-side proxy (see the /proxy directory) that injects the
+ * key and forwards the call to Gemini. This is the only way to keep the key out
+ * of the distributed extension.
  */
-export const HTML_ELEMENTS = {
-    /** Common block-level and inline HTML tags for context extraction */
-    BLOCK_TAGS: ['div', 'section', 'article', 'main', 'aside', 'header', 'footer', 'nav', 'figure', 'li', 'td', 'th', 'p', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'figcaption', 'caption', 'span', 'a'] as const,
+export const PROXY_CONFIG = {
+    /** Deployed proxy endpoint. The Gemini API key lives only on the proxy. */
+    DEFAULT_ENDPOINT: 'https://alt-gen-proxy.asobu.workers.dev',
+    /**
+     * Shared client token sent as the `x-client-token` header. It is embedded in
+     * the extension and is therefore NOT a real secret — it only filters trivial
+     * drive-by traffic. Real abuse protection lives on the proxy (rate limiting +
+     * request validation) and on Google (per-key free-tier quotas). Must match the
+     * proxy's CLIENT_TOKEN value.
+     */
+    CLIENT_TOKEN: 'altgen-public-client-v1',
 } as const;
 
 /**
- * Error Messages
+ * Direct Google Gemini API configuration, used only when the user has supplied
+ * their own API key (Bring Your Own Key). The host is a FIXED constant and must
+ * never be derived from user input, settings, or the custom-prompts file.
  */
-export const ERROR_MESSAGES = {
-    /** Editor errors */
-    NO_ACTIVE_EDITOR: '❌ No active editor',
-    EDITOR_CLOSED: 'Editor was closed during ALT generation. Please try again.',
-    DOCUMENT_EDIT_FAILED: 'Failed to edit document. The file may have been closed or modified.',
-
-    /** Tag detection errors */
-    NO_TAG_FOUND: '❌ No img or video tag found',
-    IMG_TAG_NOT_FOUND: '❌ img tag not found',
-    VIDEO_TAG_NOT_FOUND: '❌ video tag not found',
-    IMG_SRC_NOT_FOUND: '❌ img src not found',
-    VIDEO_SRC_NOT_FOUND: '❌ video src not found',
-    TAG_END_NOT_FOUND: '❌ {0} tag end not found',
-
-    /** File errors */
-    WORKSPACE_NOT_OPENED: '❌ Workspace not opened',
-    IMAGE_NOT_FOUND: '❌ Image not found: {0}',
-    VIDEO_NOT_FOUND: '❌ Video not found: {0}',
-    INVALID_FILE_PATH: '🚫 Invalid file path',
-
-    /** Format errors */
-    SVG_NOT_SUPPORTED: '🚫 SVG not supported. Convert to PNG/JPG first.',
-    VIDEO_TOO_LARGE: '❌ Video too large ({0}MB). Max {1}MB.',
-    DYNAMIC_SRC_NOT_SUPPORTED: '🚫 Dynamic src not supported: {0}',
-    INVALID_IMAGE_SOURCE: '🚫 Invalid image source: {0}',
-
-    /** API errors */
-    API_KEY_NOT_CONFIGURED: '🔑 API key not configured',
-    FETCH_IMAGE_FAILED: '❌ Failed to fetch image: {0}',
-    FETCH_IMAGE_ERROR: '❌ Error fetching image: {0}',
-
-    /** Other */
-    TAG_DETECTION_TIMEOUT: 'Tag detection timeout - text may be too complex',
-    SELECTION_TOO_LARGE: 'Selected text is too large for tag detection',
+export const GEMINI_DIRECT = {
+    /** Fixed base for the generateContent endpoint. Model name is appended as a path segment. */
+    MODELS_ENDPOINT: 'https://generativelanguage.googleapis.com/v1beta/models',
+    /** Allowlist for model names placed into the URL path (prevents path/SSRF injection). */
+    MODEL_NAME_PATTERN: /^[a-zA-Z0-9.-]+$/,
 } as const;

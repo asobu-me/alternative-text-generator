@@ -21,7 +21,6 @@ import { JSON_FORMATTING } from '../constants';
  */
 export async function handleHttpError(response: Response): Promise<never> {
     const statusCode = response.status;
-    const statusText = response.statusText;
     let errorBody: string;
 
     try {

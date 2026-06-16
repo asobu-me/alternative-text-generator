@@ -1,35 +1,36 @@
 {
-  "displayName": "ALT Generator with Gemini",
-  "description": "Auto-generate ALT attributes for img tags using Gemini API (supports HTML/PHP/JSX/TSX with static paths)",
+  "displayName": "Auto ALT Writer",
+  "description": "Auto-generate and insert alt and aria-label attributes with Gemini API. Context-aware, and leaves decorative images empty (HTML/PHP/JSX/TSX, static paths).",
 
-  "command.generateAlt": "ALT Generator: Generate ALT for images",
-  "command.generateVideoAriaLabel": "ALT Generator: Generate ARIA-LABEL or transcript for videos",
-  "command.setApiKey": "ALT Generator: Set Gemini API Key",
-  "command.clearApiKey": "ALT Generator: Clear Gemini API Key",
+  "command.generateAlt": "Auto ALT Writer: Generate ALT for images",
+  "command.generateVideoAriaLabel": "Auto ALT Writer: Generate ARIA-LABEL or transcript for videos",
+  "command.setApiKey": "Auto ALT Writer: Set your Gemini API key (use your own quota)",
+  "command.clearApiKey": "Auto ALT Writer: Remove your Gemini API key (use shared free tier)",
 
-  "config.altGenerationMode.description": "ALT Generation Mode",
+  "config.altGenerationMode.description": "[Image] Set what to prioritize when generating ALT text.",
   "config.altGenerationMode.markdownDescription": "[Image] Set what to prioritize when generating ALT text.",
   "config.altGenerationMode.enum.seo": "SEO: Generate ALT text focused on search engine optimization (SEO)",
   "config.altGenerationMode.enum.a11y": "A11Y: Generate ALT text focused on accessibility (A11Y) improvement",
 
-  "config.insertionMode.description": "Set how to insert generated text",
-  "config.insertionMode.markdownDescription": "Set how to insert generated text.",
-  "config.insertionMode.enum.auto": "Auto: Insert generated text automatically",
-  "config.insertionMode.enum.confirm": "Manual: Review generated text content before manual insertion",
+  "config.decorativeKeywords.description": "[Image] If the filename contains these keywords, the image is treated as decorative and its ALT is set to empty.",
+  "config.decorativeKeywords.markdownDescription": "[Image] If the filename contains these keywords, it will be identified as decorative and the ALT will be set to empty (`alt=\"\"`).",
 
-  "config.outputLanguage.description": "Set the language of generated text",
-
-  "config.decorativeKeywords.description": "Decorative Image Keywords",
-  "config.decorativeKeywords.markdownDescription": "If the filename contains these keywords, it will be identified as decorative and the ALT will be set to empty (`alt=\"\"`).",
-
-  "config.contextAnalysisEnabled.description": "Analyze surrounding text to prevent redundancy",
-  "config.contextAnalysisEnabled.markdownDescription": "Analyze surrounding text of images and videos. If already described by surrounding text, automatically sets `alt=\"\"` to prevent duplicate descriptions for screen readers.",
-
-  "config.videoDescriptionMode.description": "Video Description Mode",
+  "config.videoDescriptionMode.description": "[Video] Set the detail level of the generated text.",
   "config.videoDescriptionMode.markdownDescription": "[Video] Set the detail level of generated text. Use transcript mode for creating text manuscripts for audio descriptions, etc.",
   "config.videoDescriptionMode.enum.summary": "Summary: A concise label to identify what the video is before playing it",
   "config.videoDescriptionMode.enum.transcript": "Transcript: A complete transcription including visual information to fully understand the video content",
 
-  "config.customFilePath.description": "Custom File Path",
-  "config.customFilePath.markdownDescription": "Path to a Markdown file for customizing Gemini prompts and API model. Specify as a relative path from the workspace root.  \n\n**Example:** `.vscode/custom-prompts.md`"
+  "config.outputLanguage.description": "[Common] Set the language of the generated text.",
+  "config.outputLanguage.markdownDescription": "[Common] Set the language of the generated text.",
+
+  "config.insertionMode.description": "[Common] Set how the generated text is inserted.",
+  "config.insertionMode.markdownDescription": "[Common] Set how the generated text is inserted.",
+  "config.insertionMode.enum.auto": "Auto: Insert generated text automatically",
+  "config.insertionMode.enum.confirm": "Manual: Review generated text content before manual insertion",
+
+  "config.contextAnalysisEnabled.description": "[Common] Analyze surrounding text to prevent redundant descriptions for screen readers.",
+  "config.contextAnalysisEnabled.markdownDescription": "[Common] Analyze surrounding text of images and videos. If already described by surrounding text, automatically sets `alt=\"\"` to prevent duplicate descriptions for screen readers.",
+
+  "config.customFilePath.description": "[Advanced] Path to a Markdown file for customizing Gemini prompts and the API model (relative to the workspace root).",
+  "config.customFilePath.markdownDescription": "[Advanced] Path to a Markdown file for customizing Gemini prompts and API model. Specify as a relative path from the workspace root.  \n\n**Example:** `.vscode/custom-prompts.md`"
 }
