@@ -3,9 +3,10 @@
  */
 
 import * as fs from 'fs';
-import * as path from 'path';
+import * as os from 'os';
 import * as vscode from 'vscode';
 import { CHAR_CONSTRAINTS, PROMPT_CONSTRAINTS } from '../constants';
+import { selectTrustedPromptValue, resolveSafePromptPath, isAbsoluteOrTilde } from '../utils/security';
 
 // Custom prompts interface
 interface CustomPrompts {
@@ -27,6 +28,11 @@ interface CustomPrompts {
 // Cache for custom prompts
 let customPromptsCache: CustomPrompts | null = null;
 let lastPromptsFilePath: string | null = null;
+let lastSelectedPromptKey: string | null = null;
+let warnedRepoAbsolutePromptPath = false;
+
+// Type alias for the return of selectTrustedPromptValue
+type SelectedPromptValue = NonNullable<ReturnType<typeof selectTrustedPromptValue>>;
 
 // Default context instruction template (unified for all media types)
 const DEFAULT_CONTEXT_PROMPT = `
@@ -363,18 +369,6 @@ export function getDefaultPrompt(
 }
 
 /**
- * Validate that a path is within the workspace (prevent path traversal attacks)
- */
-function isPathInWorkspace(absolutePath: string, workspaceRoot: string): boolean {
-    const normalizedPath = path.normalize(absolutePath);
-    const normalizedRoot = path.normalize(workspaceRoot);
-    // Compare on a path-separator boundary so a sibling directory that merely
-    // shares the workspace name prefix (e.g. /work/proj vs /work/proj-secrets)
-    // is not treated as inside the workspace.
-    return normalizedPath === normalizedRoot || normalizedPath.startsWith(normalizedRoot + path.sep);
-}
-
-/**
  * Normalize section title for flexible matching
  * Removes leading #, spaces, hyphens, underscores, and converts to lowercase
  */
@@ -636,78 +630,90 @@ export function getGeminiApiModel(customPrompts?: CustomPrompts | null): string 
 }
 
 /**
- * Load custom prompts from external Markdown file
- * Returns null if file doesn't exist or cannot be parsed
+ * Cheap (no filesystem) selection of the effective custom-prompts setting value,
+ * applying the origin-trust policy. Warns at most once per session when a repository
+ * setting tries to point the prompts file outside the workspace.
+ */
+function getSelectedPromptValue(): SelectedPromptValue | null {
+    const config = vscode.workspace.getConfiguration('autoAltWriter');
+    const inspect = config.inspect<string>('customFilePath');
+    if (!inspect) {
+        return null;
+    }
+
+    // Visibility: a repo trying to point the prompts file outside the workspace is a
+    // (benign-by-design) security event worth a log line, but never a modal.
+    // Guard ensures this fires at most once per session.
+    const repoValue = inspect.workspaceFolderValue ?? inspect.workspaceValue;
+    if (!warnedRepoAbsolutePromptPath && repoValue !== undefined && isAbsoluteOrTilde(repoValue)) {
+        warnedRepoAbsolutePromptPath = true;
+        console.warn(
+            '[Auto ALT Writer] Ignored an absolute custom-prompts path from workspace settings; ' +
+            'only User (global) settings may point outside the workspace.'
+        );
+    }
+
+    return selectTrustedPromptValue({
+        defaultValue: inspect.defaultValue,
+        globalValue: inspect.globalValue,
+        workspaceValue: inspect.workspaceValue,
+        workspaceFolderValue: inspect.workspaceFolderValue,
+    });
+}
+
+/**
+ * Load and parse custom prompts from the resolved Markdown file.
+ * Returns null if no safe file exists or it cannot be parsed (use defaults).
  *
- * Security features:
- * - Path traversal protection: Only loads files within workspace
- * - File size limit: Maximum 10MB to prevent memory exhaustion
- * - Structure validation: Only accepts expected H1 section names
+ * Performance: the cheap config.inspect + trust-policy selection runs on every call
+ * (no filesystem I/O). The fs-heavy resolveSafePromptPath is only called on a cache
+ * miss or when the selected setting value changes.
+ *
+ * Security: path trust/containment is enforced via origin-based absolute-path policy
+ * + realpath symlink-escape protection (see utils/security.ts).
  */
 export function loadCustomPrompts(): CustomPrompts | null {
     try {
-        const config = vscode.workspace.getConfiguration('autoAltWriter');
-        const customPromptsPath = config.get<string>('customFilePath', '.vscode/custom-prompts.md');
-
-        // Get workspace folder
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) {
-            console.log('[Auto ALT Writer] No workspace folder found');
+        // Cheap path: config.inspect + trust policy — no filesystem I/O.
+        const selected = getSelectedPromptValue();
+        if (!selected) {
             return null;
         }
 
-        const workspaceRoot = workspaceFolders[0].uri.fsPath;
-        const absolutePath = path.resolve(workspaceRoot, customPromptsPath);
+        const selectedKey = `${selected.trusted ? 'T' : 'U'}:${selected.value}`;
+        // Warm cache: same selection as last time AND we have a parsed result → no fs I/O.
+        if (selectedKey === lastSelectedPromptKey && customPromptsCache !== null) {
+            return customPromptsCache;
+        }
+        lastSelectedPromptKey = selectedKey;
 
-        // Security: Prevent path traversal attacks
-        if (!isPathInWorkspace(absolutePath, workspaceRoot)) {
-            console.error('[Auto ALT Writer] Security: Custom prompts path is outside workspace');
+        // Cache miss or selection changed — now do the fs-heavy resolution.
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        const absolutePath = resolveSafePromptPath(selected.value, selected.trusted, workspaceRoot, os.homedir());
+        if (!absolutePath) {
+            customPromptsCache = null;
             return null;
         }
 
-        // Check if file path changed
+        // Reset cache if the resolved file changed.
         if (lastPromptsFilePath !== absolutePath) {
             customPromptsCache = null;
             lastPromptsFilePath = absolutePath;
         }
-
-        // Return cached prompts if available
         if (customPromptsCache !== null) {
             return customPromptsCache;
         }
 
-        // Check if file exists and is a file (not a directory)
-        if (!fs.existsSync(absolutePath)) {
-            return null; // File doesn't exist, use defaults (this is normal)
-        }
-
-        const stat = fs.statSync(absolutePath);
-        if (!stat.isFile()) {
-            return null; // Path is a directory, not a file (this is normal)
-        }
-
-        // Security: File size limit (10MB maximum)
-        const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
-        if (stat.size > MAX_FILE_SIZE) {
-            console.error('[Auto ALT Writer] Prompt file too large (max 10MB)');
-            return null;
-        }
-
-        // Read and parse Markdown file
         const fileContent = fs.readFileSync(absolutePath, 'utf-8');
         const parsedPrompts = parseMarkdownPrompts(fileContent);
-
         if (!parsedPrompts) {
             console.error('[Auto ALT Writer] Invalid custom prompts structure');
             return null;
         }
 
-        // Cache the prompts
         customPromptsCache = parsedPrompts;
-
         return parsedPrompts;
     } catch (error) {
-        // Only log errors for actual problems (not "file not found")
         if (error instanceof Error && !error.message.includes('ENOENT')) {
             console.error('[Auto ALT Writer] Failed to load custom prompts:', error);
         }
