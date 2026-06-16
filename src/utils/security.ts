@@ -296,3 +296,50 @@ export async function validateRemoteImageUrl(rawUrl: string): Promise<Validation
 
     return { valid: true };
 }
+
+/**
+ * Subset of vscode WorkspaceConfiguration.inspect() result needed for prompt-path
+ * trust decisions. Kept vscode-free so the selection logic stays pure/testable.
+ */
+export interface PromptPathInspect {
+    defaultValue?: string;
+    globalValue?: string;
+    workspaceValue?: string;
+    workspaceFolderValue?: string;
+}
+
+/** A chosen setting value plus whether its origin is trusted to point outside the workspace. */
+export interface SelectedPromptValue {
+    value: string;
+    /** true → global (User) or built-in default origin; absolute paths are permitted. */
+    trusted: boolean;
+}
+
+/** True if the value is an absolute path or a tilde (home) path. */
+export function isAbsoluteOrTilde(value: string): boolean {
+    return path.isAbsolute(value) || value === '~' || value.startsWith('~/') || value.startsWith('~\\');
+}
+
+/**
+ * Choose the effective custom-prompts setting value, honoring VS Code precedence
+ * (folder > workspace > global > default) but with a security override:
+ * a repository-supplied (workspace/folder) ABSOLUTE or ~ path is rejected, falling
+ * back to the global value, then the default. Only global/default origins are trusted
+ * to point outside the workspace. Pure function: no fs / vscode access.
+ */
+export function selectTrustedPromptValue(inspect: PromptPathInspect): SelectedPromptValue | null {
+    const untrusted = inspect.workspaceFolderValue ?? inspect.workspaceValue;
+
+    if (untrusted !== undefined && !isAbsoluteOrTilde(untrusted)) {
+        return { value: untrusted, trusted: false };
+    }
+    // (untrusted absolute/~ is silently dropped here — fall through to trusted origins)
+
+    if (inspect.globalValue !== undefined) {
+        return { value: inspect.globalValue, trusted: true };
+    }
+    if (inspect.defaultValue !== undefined) {
+        return { value: inspect.defaultValue, trusted: true };
+    }
+    return null;
+}

@@ -4,7 +4,8 @@ import {
     validateImageSrc,
     sanitizeFilePath,
     escapeHtml,
-    validateRemoteImageUrl
+    validateRemoteImageUrl,
+    selectTrustedPromptValue
 } from '../../utils/security';
 
 suite('security', () => {
@@ -107,6 +108,66 @@ suite('security', () => {
     suite('escapeHtml', () => {
         test('escapes angle brackets and quotes', () => {
             assert.strictEqual(escapeHtml('<a "x">'), '&lt;a &quot;x&quot;&gt;');
+        });
+    });
+
+    suite('selectTrustedPromptValue', () => {
+        test('picks a repo (workspace) relative value as untrusted', () => {
+            const r = selectTrustedPromptValue({
+                defaultValue: '.vscode/custom-prompts.md',
+                workspaceValue: 'config/prompts.md',
+            });
+            assert.deepStrictEqual(r, { value: 'config/prompts.md', trusted: false });
+        });
+
+        test('workspaceFolderValue takes precedence over workspaceValue', () => {
+            const r = selectTrustedPromptValue({
+                workspaceValue: 'a.md',
+                workspaceFolderValue: 'b.md',
+            });
+            assert.deepStrictEqual(r, { value: 'b.md', trusted: false });
+        });
+
+        test('rejects a repo ABSOLUTE value and falls back to the global value', () => {
+            const r = selectTrustedPromptValue({
+                defaultValue: '.vscode/custom-prompts.md',
+                globalValue: '/Users/me/prompts.md',
+                workspaceValue: '/Users/victim/.ssh/id_rsa',
+            });
+            assert.deepStrictEqual(r, { value: '/Users/me/prompts.md', trusted: true });
+        });
+
+        test('rejects a repo absolute value and falls back to default when no global', () => {
+            const r = selectTrustedPromptValue({
+                defaultValue: '.vscode/custom-prompts.md',
+                workspaceValue: '/etc/passwd',
+            });
+            assert.deepStrictEqual(r, { value: '.vscode/custom-prompts.md', trusted: true });
+        });
+
+        test('rejects a repo tilde value as untrusted-absolute', () => {
+            const r = selectTrustedPromptValue({
+                defaultValue: '.vscode/custom-prompts.md',
+                workspaceValue: '~/secrets.md',
+            });
+            assert.deepStrictEqual(r, { value: '.vscode/custom-prompts.md', trusted: true });
+        });
+
+        test('allows a global absolute value as trusted', () => {
+            const r = selectTrustedPromptValue({ globalValue: '/Users/me/prompts.md' });
+            assert.deepStrictEqual(r, { value: '/Users/me/prompts.md', trusted: true });
+        });
+
+        test('repo relative value overrides a global absolute value', () => {
+            const r = selectTrustedPromptValue({
+                globalValue: '/Users/me/prompts.md',
+                workspaceValue: 'config/prompts.md',
+            });
+            assert.deepStrictEqual(r, { value: 'config/prompts.md', trusted: false });
+        });
+
+        test('returns null when nothing is set', () => {
+            assert.strictEqual(selectTrustedPromptValue({}), null);
         });
     });
 });
