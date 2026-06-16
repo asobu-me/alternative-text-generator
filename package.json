@@ -1,5 +1,5 @@
 {
-  "name": "gemini-alt-generator",
+  "name": "auto-alt-writer",
   "displayName": "%displayName%",
   "description": "%description%",
   "version": "1.0.0",
@@ -8,10 +8,10 @@
   "icon": "images/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/akky709/gemini-alt-generator"
+    "url": "https://github.com/asobu-me/alternative-text-generator"
   },
   "bugs": {
-    "url": "https://github.com/akky709/gemini-alt-generator/issues"
+    "url": "https://github.com/asobu-me/alternative-text-generator/issues"
   },
   "homepage": "https://note.com/akky709",
   "keywords": [
@@ -39,25 +39,25 @@
   "contributes": {
     "commands": [
       {
-        "command": "alt-generator.generateAlt",
+        "command": "auto-alt-writer.generateAlt",
         "title": "%command.generateAlt%"
       },
       {
-        "command": "alt-generator.generateVideoAriaLabel",
+        "command": "auto-alt-writer.generateVideoAriaLabel",
         "title": "%command.generateVideoAriaLabel%"
       },
       {
-        "command": "alt-generator.setApiKey",
+        "command": "auto-alt-writer.setApiKey",
         "title": "%command.setApiKey%"
       },
       {
-        "command": "alt-generator.clearApiKey",
+        "command": "auto-alt-writer.clearApiKey",
         "title": "%command.clearApiKey%"
       }
     ],
     "configuration": {
       "properties": {
-        "altGenGemini.altGenerationMode": {
+        "autoAltWriter.altGenerationMode": {
           "order": 0,
           "type": "string",
           "default": "SEO",
@@ -76,43 +76,8 @@
           "description": "%config.altGenerationMode.description%",
           "markdownDescription": "%config.altGenerationMode.markdownDescription%"
         },
-        "altGenGemini.insertionMode": {
+        "autoAltWriter.decorativeKeywords": {
           "order": 1,
-          "type": "string",
-          "default": "confirm",
-          "enum": [
-            "auto",
-            "confirm"
-          ],
-          "enumDescriptions": [
-            "%config.insertionMode.enum.auto%",
-            "%config.insertionMode.enum.confirm%"
-          ],
-          "enumItemLabels": [
-            "Auto",
-            "Manual"
-          ],
-          "description": "%config.insertionMode.description%",
-          "markdownDescription": "%config.insertionMode.markdownDescription%"
-        },
-        "altGenGemini.outputLanguage": {
-          "order": 2,
-          "type": "string",
-          "default": "auto",
-          "enum": [
-            "auto",
-            "ja",
-            "en"
-          ],
-          "enumItemLabels": [
-            "Auto",
-            "日本語",
-            "English"
-          ],
-          "description": "%config.outputLanguage.description%"
-        },
-        "altGenGemini.decorativeKeywords": {
-          "order": 3,
           "type": "array",
           "default": [
             "icon-",
@@ -125,8 +90,8 @@
           "description": "%config.decorativeKeywords.description%",
           "markdownDescription": "%config.decorativeKeywords.markdownDescription%"
         },
-        "altGenGemini.videoDescriptionMode": {
-          "order": 4,
+        "autoAltWriter.videoDescriptionMode": {
+          "order": 2,
           "type": "string",
           "default": "summary",
           "enum": [
@@ -144,14 +109,50 @@
           "description": "%config.videoDescriptionMode.description%",
           "markdownDescription": "%config.videoDescriptionMode.markdownDescription%"
         },
-        "altGenGemini.contextAnalysisEnabled": {
+        "autoAltWriter.outputLanguage": {
+          "order": 3,
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "ja",
+            "en"
+          ],
+          "enumItemLabels": [
+            "Auto",
+            "日本語",
+            "English"
+          ],
+          "description": "%config.outputLanguage.description%",
+          "markdownDescription": "%config.outputLanguage.markdownDescription%"
+        },
+        "autoAltWriter.insertionMode": {
+          "order": 4,
+          "type": "string",
+          "default": "confirm",
+          "enum": [
+            "auto",
+            "confirm"
+          ],
+          "enumDescriptions": [
+            "%config.insertionMode.enum.auto%",
+            "%config.insertionMode.enum.confirm%"
+          ],
+          "enumItemLabels": [
+            "Auto",
+            "Manual"
+          ],
+          "description": "%config.insertionMode.description%",
+          "markdownDescription": "%config.insertionMode.markdownDescription%"
+        },
+        "autoAltWriter.contextAnalysisEnabled": {
           "order": 5,
           "type": "boolean",
           "default": false,
           "description": "%config.contextAnalysisEnabled.description%",
           "markdownDescription": "%config.contextAnalysisEnabled.markdownDescription%"
         },
-        "altGenGemini.customFilePath": {
+        "autoAltWriter.customFilePath": {
           "order": 6,
           "type": "string",
           "default": ".vscode/custom-prompts.md",
@@ -162,13 +163,13 @@
     },
     "keybindings": [
       {
-        "command": "alt-generator.generateAlt",
+        "command": "auto-alt-writer.generateAlt",
         "key": "ctrl+alt+a",
         "mac": "cmd+alt+a",
         "when": "editorTextFocus"
       },
       {
-        "command": "alt-generator.generateVideoAriaLabel",
+        "command": "auto-alt-writer.generateVideoAriaLabel",
         "key": "ctrl+alt+v",
         "mac": "cmd+alt+v",
         "when": "editorTextFocus"
@@ -177,12 +178,12 @@
     "menus": {
       "editor/context": [
         {
-          "command": "alt-generator.generateAlt",
+          "command": "auto-alt-writer.generateAlt",
           "group": "1_modification@1",
           "when": "editorTextFocus"
         },
         {
-          "command": "alt-generator.generateVideoAriaLabel",
+          "command": "auto-alt-writer.generateVideoAriaLabel",
           "group": "1_modification@2",
           "when": "editorTextFocus"
         }
@@ -194,15 +195,19 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile && npm run lint",
-    "lint": "eslint src --ext ts"
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "^18.0.0",
     "@types/node-fetch": "^2.6.13",
     "@types/vscode": "^1.80.0",
     "@typescript-eslint/eslint-plugin": "^5.0.0",
     "@typescript-eslint/parser": "^5.0.0",
+    "@vscode/test-electron": "^2.5.2",
     "eslint": "^8.0.0",
+    "mocha": "^10.8.2",
     "typescript": "^5.0.0"
   },
   "dependencies": {

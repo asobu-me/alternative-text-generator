@@ -1,8 +1,8 @@
-# ALT Generator with Gemini
+# Auto ALT Writer
 
 Automatically generate ALT attributes for img tags, aria-label attributes for video tags, and transcript text using Gemini API.
 
-![Demo](https://raw.githubusercontent.com/akky709/gemini-alt-generator/main/images/readme.gif)
+![Demo](https://raw.githubusercontent.com/asobu-me/alternative-text-generator/main/images/readme.gif)
 
 ## Features
 
@@ -41,7 +41,7 @@ Enable context analysis to generate more accurate descriptions by analyzing surr
 
 **How to Enable:**
 1. Open Settings (`Cmd+,` or `Ctrl+,`)
-2. Search for "Alt Generator: Context Analysis Enabled"
+2. Search for "Auto ALT Writer: Context Analysis Enabled"
 3. Check the box to enable
 
 **What it does:**
@@ -67,7 +67,8 @@ Want even more control? Use **Custom Prompts** to unlock:
 > **Note:** By default, this extension focuses on **direct image/video analysis** for simplicity and speed. Context analysis can be enabled via settings or through custom prompts configuration.
 
 ### 🔒 Security & Performance
-- **Secure API Key Storage**: API keys are encrypted using VSCode's Secrets API
+- **No-key default**: Works out of the box via a shared proxy — no personal API key is bundled into or exposed by the extension
+- **Secure API Key Storage (BYOK)**: When you bring your own key, it is stored in your OS keychain via VS Code SecretStorage — never in plain text, never synced, and sent only to Google (in a request header)
 - **ReDoS Protection**: Regex patterns optimized to prevent catastrophic backtracking attacks
 - **Memory Efficient**: Processes large batches in chunks (10 items per chunk) to minimize memory usage
 - **Smart Caching**: Multiple caching strategies reduce redundant operations
@@ -80,52 +81,58 @@ Want even more control? Use **Custom Prompts** to unlock:
 - **Cancel Support**: Stop processing anytime during batch operations
 ## Quick Start
 
-### 1. Get Gemini API Key
+### Works out of the box
 
+**No setup or API key required.** The extension ships with a shared free tier, so you can start generating ALT text immediately — place your cursor in a tag and press the shortcut (see [Usage](#usage)).
+
+> The shared free tier is a convenience with limited capacity (Gemini free-tier rate limits, shared across all users). For heavy or batch use, bring your own key below.
+
+### (Optional) Use your own Gemini API key
+
+Bring your own key to get your own rate limits and quota, and to send image/video data **directly to Google** instead of through the shared service.
+
+**1. Get a key**
 1. Visit [Google AI Studio](https://aistudio.google.com/app/api-keys)
-2. Click "Create API Key"
-3. Copy the API key
+2. Click "Create API Key" and copy it
 
-### 2. Set API Key
+**2. Set the key**
+1. Press `Cmd+Shift+P` (Windows: `Ctrl+Shift+P`) to open the Command Palette
+2. Run **"Auto ALT Writer: Set your Gemini API key (use your own quota)"**
+3. Paste your key in the secure input box and press Enter
 
-**Required: Set your Gemini API key via Command Palette**
+When a personal key is set, all requests go **directly to Google** using your key. Otherwise the shared free tier is used.
 
-1. Press `Cmd+Shift+P` (Windows: `Ctrl+Shift+P`) to open Command Palette
-2. Type **"ALT Generator: Set Gemini API Key"** and select it
-3. Paste your API key in the secure input box
-4. Press Enter
+**🔐 How your key is stored:**
+- Stored in your OS keychain via VS Code SecretStorage (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+- **Never** written to `settings.json` or any plain-text file, never synced by Settings Sync, and never sent through the shared proxy
+- Sent only to Google, in a request header (never placed in the URL or logs)
 
-**🔐 API Key Security:**
-- Your API key is **encrypted** and stored in your OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service)
-- **Never stored in `settings.json`** or any plain text file
-- Cannot be accessed by other extensions or applications
+**To stop using your key:**
+- Run **"Auto ALT Writer: Remove your Gemini API key (use shared free tier)"** to delete it and revert to the shared free tier.
 
-**To clear your API key:**
-- Open Command Palette and run **"ALT Generator: Clear Gemini API Key"**
+### Configure Extension (Optional)
 
-### 3. Configure Extension (Optional)
-
-Press `Cmd+,` (Windows: `Ctrl+,`) and search for "Alt Generator"
+Press `Cmd+,` (Windows: `Ctrl+,`) and search for "Auto ALT Writer". Settings are grouped by scope: `[Image]` → `[Video]` → `[Common]` → `[Advanced]`.
 
 **Available Settings:**
-- **ALT Generation Mode**: SEO or A11Y (default: SEO)
-- **Insertion Mode**: Auto or Manual (default: Manual - review before insertion)
-- **Output Language**: Auto, Japanese, or English (default: Auto)
-- **Context Analysis Enabled**: Enable context-aware generation (default: false)
-- **Decorative Keywords**: Customize keywords for decorative image detection
-- **Video Description Mode**: Summary (aria-label) or Transcript (HTML comment) (default: Summary)
-- **Custom File Path**: Path to custom prompts Markdown file
+- **ALT Generation Mode** `[Image]`: SEO or A11Y (default: SEO)
+- **Decorative Keywords** `[Image]`: Customize keywords for decorative image detection
+- **Video Description Mode** `[Video]`: Summary (aria-label) or Transcript (HTML comment) (default: Summary)
+- **Output Language** `[Common]`: Auto, Japanese, or English (default: Auto)
+- **Insertion Mode** `[Common]`: Auto or Manual (default: Manual - review before insertion)
+- **Context Analysis Enabled** `[Common]`: Enable context-aware generation (default: false)
+- **Custom File Path** `[Advanced]`: Path to custom prompts Markdown file
 
 Or edit `settings.json`:
 ```json
 {
-  "altGenGemini.altGenerationMode": "SEO",
-  "altGenGemini.insertionMode": "confirm",
-  "altGenGemini.outputLanguage": "auto",
-  "altGenGemini.contextAnalysisEnabled": false,
-  "altGenGemini.decorativeKeywords": ["icon-", "bg-", "deco-"],
-  "altGenGemini.videoDescriptionMode": "summary",
-  "altGenGemini.customFilePath": ".vscode/custom-prompts.md"
+  "autoAltWriter.altGenerationMode": "SEO",
+  "autoAltWriter.insertionMode": "confirm",
+  "autoAltWriter.outputLanguage": "auto",
+  "autoAltWriter.contextAnalysisEnabled": false,
+  "autoAltWriter.decorativeKeywords": ["icon-", "bg-", "deco-"],
+  "autoAltWriter.videoDescriptionMode": "summary",
+  "autoAltWriter.customFilePath": ".vscode/custom-prompts.md"
 }
 ```
 
@@ -240,7 +247,7 @@ The extension supports two insertion modes for both **images (ALT)** and **video
 
 **To change the insertion mode:**
 1. Press `Cmd+,` (Windows: `Ctrl+,`) to open Settings
-2. Search for "Alt Generator: Insertion Mode"
+2. Search for "Auto ALT Writer: Insertion Mode"
 3. Choose "Auto" or "Manual"
 
 ### Video Description Modes
@@ -282,6 +289,7 @@ Customize keywords in settings to match your project's naming conventions.
 - Wait 1 minute before retrying
 - Process fewer images at once
 - Add decorative keywords to skip unnecessary images
+- The shared free tier is rate-limited across all users — **set your own API key** (see Quick Start) to use your own quota
 
 ### Dynamic src Attributes Error
 - Only static string paths are supported
@@ -366,7 +374,7 @@ Output only the alt text.
 - Video files: Recommended 10MB or less (max 20MB)
 - Processing time depends on number of images and API model
 - Free tier has usage limits - see Gemini API documentation
-- API keys are securely stored and never transmitted except to Google's Gemini API
+- By default, requests go through a shared proxy service (no personal API key required). When you set your own key, requests and image/video data go **directly to Google's Gemini API**, and your key is stored only in your OS keychain — never sent through the proxy
 
 ## License
 

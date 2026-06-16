@@ -15,6 +15,11 @@ const WHITESPACE_REGEX = /\s+/g;
 const BLOCK_TAGS = ['div', 'section', 'article', 'main', 'aside', 'header', 'footer', 'nav', 'figure', 'li', 'td', 'th', 'p', 'blockquote'];
 const BLOCK_TAG_PATTERN = new RegExp(`<(${BLOCK_TAGS.join('|')})[\\s>]`, 'gi');
 
+// Sibling tags include block + inline + heading elements (hoisted to module scope
+// so the pattern is compiled once instead of on every findSiblingElements call)
+const SIBLING_TAGS = ['div', 'section', 'article', 'main', 'aside', 'header', 'footer', 'nav', 'figure', 'li', 'td', 'th', 'p', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'figcaption', 'caption', 'span', 'a'];
+const SIBLING_TAG_PATTERN = new RegExp(`<(${SIBLING_TAGS.join('|')})[\\s>]`, 'gi');
+
 // Cache for close tag patterns (created on demand)
 const closeTagPatternCache = new Map<string, RegExp>();
 
@@ -168,9 +173,8 @@ function findSiblingElements(
     const searchStart = Math.max(0, imageStart - maxSearch);
     const searchEnd = Math.min(fullText.length, imageEnd + maxSearch);
 
-    // Sibling tags include block + inline + heading elements
-    const SIBLING_TAGS = ['div', 'section', 'article', 'main', 'aside', 'header', 'footer', 'nav', 'figure', 'li', 'td', 'th', 'p', 'blockquote', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'figcaption', 'caption', 'span', 'a'];
-    const siblingTagPattern = new RegExp(`<(${SIBLING_TAGS.join('|')})[\\s>]`, 'gi');
+    // Use the module-level pre-compiled pattern (lastIndex is reset before each scan)
+    const siblingTagPattern = SIBLING_TAG_PATTERN;
 
     // 画像の前にある兄弟要素を検索（最大3つまで）
     const beforeText = fullText.substring(searchStart, imageStart);
@@ -278,26 +282,17 @@ export function extractSurroundingText(
     const afterTexts: string[] = [];
 
     /**
-     * Check if text is duplicate or substring of existing texts
-     * Optimized to avoid O(n²) complexity by using cached text array
+     * Check if text is a duplicate of, or overlaps (substring either direction
+     * with) any already-collected text. Single pass over the central cache.
      */
-    function isDuplicateOrSubstring(newText: string, existingTexts: string[]): boolean {
+    function isDuplicateOrSubstring(newText: string): boolean {
         // Exact match check (O(1))
         if (collectedTextSet.has(newText)) {
             return true;
         }
 
-        // Use collectedTexts instead of existingTexts to avoid redundant checks
-        // Check if newText is substring of any existing text
         for (const existing of collectedTexts) {
-            if (existing.includes(newText)) {
-                return true;
-            }
-        }
-
-        // Check if any existing text is substring of newText
-        for (const existing of collectedTexts) {
-            if (newText.includes(existing)) {
+            if (existing.includes(newText) || newText.includes(existing)) {
                 return true;
             }
         }
@@ -315,7 +310,7 @@ export function extractSurroundingText(
         const targetArray = sibling.position === 'before' ? beforeTexts : afterTexts;
 
         // 重複または部分一致していないテキストのみ追加
-        if (!isDuplicateOrSubstring(text, targetArray)) {
+        if (!isDuplicateOrSubstring(text)) {
             targetArray.push(text);
             collectedTextSet.add(text);
             collectedTexts.push(text); // Add to central cache
@@ -339,12 +334,12 @@ export function extractSurroundingText(
         const cleanedAfter = stripHtmlTags(afterImage).trim();
 
         // 重複または部分一致していないテキストのみ収集
-        if (cleanedBefore.length > 0 && !isDuplicateOrSubstring(cleanedBefore, beforeTexts)) {
+        if (cleanedBefore.length > 0 && !isDuplicateOrSubstring(cleanedBefore)) {
             beforeTexts.push(cleanedBefore);
             collectedTextSet.add(cleanedBefore);
             collectedTexts.push(cleanedBefore); // Add to central cache
         }
-        if (cleanedAfter.length > 0 && !isDuplicateOrSubstring(cleanedAfter, afterTexts)) {
+        if (cleanedAfter.length > 0 && !isDuplicateOrSubstring(cleanedAfter)) {
             afterTexts.push(cleanedAfter);
             collectedTextSet.add(cleanedAfter);
             collectedTexts.push(cleanedAfter); // Add to central cache

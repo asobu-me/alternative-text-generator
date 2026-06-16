@@ -34,6 +34,13 @@ interface VideoData {
 }
 
 /**
+ * Pre-fetched configuration shared across a batch to avoid per-video lookups
+ */
+interface VideoBatchOptions {
+    videoDescriptionLength?: 'summary' | 'transcript';
+}
+
+/**
  * Result of aria-label generation
  */
 interface AriaLabelResult {
@@ -193,13 +200,13 @@ function applyAriaLabelToTag(
  * Main entry point for video processing
  */
 export async function processSingleVideoTag(
-    context: vscode.ExtensionContext,
     editor: vscode.TextEditor,
     selection: vscode.Selection,
     token?: vscode.CancellationToken,
     insertionMode?: string,
     cachedSurroundingText?: string,
-    progress?: vscode.Progress<{ message?: string; increment?: number }>
+    progress?: vscode.Progress<{ message?: string; increment?: number }>,
+    batchOptions?: VideoBatchOptions
 ): Promise<AriaLabelResult | void> {
     // Extract video tag information
     const videoTagInfo = await extractVideoTagInfo(editor, selection);
@@ -218,15 +225,10 @@ export async function processSingleVideoTag(
         return;
     }
 
-    // Get API configuration
-    const apiKey = await context.secrets.get('altGenGemini.geminiApiKey');
-    if (!apiKey) {
-        vscode.window.showErrorMessage('🔑 API key not configured');
-        return;
-    }
-
-    const config = vscode.workspace.getConfiguration('altGenGemini');
-    const videoDescriptionLength = config.get<string>('videoDescriptionMode', 'summary') as 'summary' | 'transcript';
+    // Resolve description mode (use pre-fetched batch value when available).
+    // No API key is needed here — the proxy holds it server-side.
+    const videoDescriptionLength = batchOptions?.videoDescriptionLength
+        ?? vscode.workspace.getConfiguration('autoAltWriter').get<string>('videoDescriptionMode', 'summary') as 'summary' | 'transcript';
 
     // Load custom prompts once for all subsequent operations
     const customPrompts = loadCustomPrompts();
@@ -252,7 +254,6 @@ export async function processSingleVideoTag(
 
     // Generate aria-label or description
     const description = await generateVideoAriaLabelWithRetry(
-        apiKey,
         videoData.base64Video,
         videoData.mimeType,
         geminiModel,

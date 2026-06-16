@@ -10,7 +10,7 @@ export class GeminiError extends Error {
     public readonly isRetryable: boolean;
     public readonly errorType: string;
 
-    constructor(message: string, statusCode?: number, isRetryable: boolean = false, errorType: string = 'UNKNOWN') {
+    constructor(message: string, statusCode?: number, isRetryable = false, errorType = 'UNKNOWN') {
         super(message);
         this.name = 'GeminiError';
         this.statusCode = statusCode;
@@ -25,7 +25,7 @@ export class GeminiError extends Error {
  * User should wait before trying again
  */
 export class RateLimitError extends GeminiError {
-    constructor(message: string = 'Rate limit exceeded. Please wait and try again.') {
+    constructor(message = 'Rate limit exceeded. Please wait and try again.') {
         super(message, 429, false, 'RATE_LIMIT');
         this.name = 'RateLimitError';
         Object.setPrototypeOf(this, RateLimitError.prototype);
@@ -105,7 +105,7 @@ export class ResponseFormatError extends GeminiError {
  * Cancellation error - Not retryable
  */
 export class CancellationError extends GeminiError {
-    constructor(message: string = 'Operation was cancelled by user') {
+    constructor(message = 'Operation was cancelled by user') {
         super(message, undefined, false, 'CANCELLED');
         this.name = 'CancellationError';
         Object.setPrototypeOf(this, CancellationError.prototype);

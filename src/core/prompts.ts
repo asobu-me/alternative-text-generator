@@ -43,7 +43,11 @@ If surrounding text fully describes the {mediaType}, return the special keyword:
  * @param type - Type of media: 'seo', 'a11y', or 'video'
  * @returns Context instruction string or empty string if no meaningful context
  */
-function getContextInstruction(surroundingText: string, type: 'seo' | 'a11y' | 'video'): string {
+function getContextInstruction(
+    surroundingText: string,
+    type: 'seo' | 'a11y' | 'video',
+    customPrompts?: CustomPrompts | null
+): string {
     // Determine media type for placeholder replacement
     const mediaType = type === 'video' ? 'video' : 'image';
     const mediaTypeUpper = mediaType.toUpperCase();
@@ -54,9 +58,9 @@ function getContextInstruction(surroundingText: string, type: 'seo' | 'a11y' | '
         .replace(/BEFORE_MEDIA/g, `BEFORE_${mediaTypeUpper}`)
         .replace(/AFTER_MEDIA/g, `AFTER_${mediaTypeUpper}`);
 
-    // Try to load custom context prompts
-    const customPrompts = loadCustomPrompts();
-    const customContextPrompt = customPrompts?.context;
+    // Use pre-loaded custom prompts when provided (avoids redundant reloads per item)
+    const resolvedPrompts = customPrompts !== undefined ? customPrompts : loadCustomPrompts();
+    const customContextPrompt = resolvedPrompts?.context;
 
     // Handle string format (unified format)
     if (customContextPrompt && typeof customContextPrompt === 'string' && customContextPrompt.trim() !== '') {
@@ -126,7 +130,7 @@ export function needsSurroundingText(
     customPrompts?: CustomPrompts | null
 ): boolean {
     // Priority 1: Check VS Code settings
-    const config = vscode.workspace.getConfiguration('altGenGemini');
+    const config = vscode.workspace.getConfiguration('autoAltWriter');
     const contextAnalysisEnabled = config.get<boolean>('contextAnalysisEnabled', false);
 
     if (contextAnalysisEnabled) {
@@ -228,7 +232,7 @@ export function getDefaultPrompt(
             // Replace {context} placeholder with context instruction
             if (result.includes('{context}')) {
                 const contextInstruction = (needsContext && options?.surroundingText)
-                    ? getContextInstruction(options.surroundingText, 'seo')
+                    ? getContextInstruction(options.surroundingText, 'seo', customPrompts)
                     : '';
                 result = result.replace(/{context}/g, contextInstruction);
             }
@@ -249,7 +253,7 @@ export function getDefaultPrompt(
         const basePrompt = buildSeoPrompt(lang);
         const needsContext = needsSurroundingText('seo', undefined, customPrompts);
         const contextInstruction = (needsContext && options?.surroundingText)
-            ? getContextInstruction(options.surroundingText, 'seo')
+            ? getContextInstruction(options.surroundingText, 'seo', customPrompts)
             : '';
         return basePrompt + contextInstruction;
     }
@@ -280,7 +284,7 @@ export function getDefaultPrompt(
             // Replace {context} placeholder with context instruction
             if (result.includes('{context}')) {
                 const contextInstruction = (needsContext && options?.surroundingText)
-                    ? getContextInstruction(options.surroundingText, 'video')
+                    ? getContextInstruction(options.surroundingText, 'video', customPrompts)
                     : '';
                 result = result.replace(/{context}/g, contextInstruction);
             }
@@ -301,7 +305,7 @@ export function getDefaultPrompt(
         const basePrompt = buildVideoPrompt(lang, videoMode);
         const needsContext = needsSurroundingText('video', videoMode, customPrompts);
         const contextInstruction = (needsContext && options?.surroundingText)
-            ? getContextInstruction(options.surroundingText, 'video')
+            ? getContextInstruction(options.surroundingText, 'video', customPrompts)
             : '';
         return basePrompt + contextInstruction;
     }
@@ -329,7 +333,7 @@ export function getDefaultPrompt(
             // Replace {context} placeholder with context instruction
             if (result.includes('{context}')) {
                 const contextInstruction = (needsContext && options?.surroundingText)
-                    ? getContextInstruction(options.surroundingText, 'a11y')
+                    ? getContextInstruction(options.surroundingText, 'a11y', customPrompts)
                     : '';
                 result = result.replace(/{context}/g, contextInstruction);
             }
@@ -350,7 +354,7 @@ export function getDefaultPrompt(
         const basePrompt = buildA11yPrompt(lang, charConstraint);
         const needsContext = needsSurroundingText('a11y', undefined, customPrompts);
         const contextInstruction = (needsContext && options?.surroundingText)
-            ? getContextInstruction(options.surroundingText, 'a11y')
+            ? getContextInstruction(options.surroundingText, 'a11y', customPrompts)
             : '';
         return basePrompt + contextInstruction;
     }
@@ -364,7 +368,10 @@ export function getDefaultPrompt(
 function isPathInWorkspace(absolutePath: string, workspaceRoot: string): boolean {
     const normalizedPath = path.normalize(absolutePath);
     const normalizedRoot = path.normalize(workspaceRoot);
-    return normalizedPath.startsWith(normalizedRoot);
+    // Compare on a path-separator boundary so a sibling directory that merely
+    // shares the workspace name prefix (e.g. /work/proj vs /work/proj-secrets)
+    // is not treated as inside the workspace.
+    return normalizedPath === normalizedRoot || normalizedPath.startsWith(normalizedRoot + path.sep);
 }
 
 /**
@@ -476,7 +483,7 @@ function extractModeFromComment(commentContent: string): string | null {
  */
 function parseMarkdownPrompts(content: string): CustomPrompts | null {
     if (!content || content.trim() === '') {
-        console.error('[ALT Generator] Empty markdown content');
+        console.error('[Auto ALT Writer] Empty markdown content');
         return null;
     }
 
@@ -523,7 +530,7 @@ function parseMarkdownPrompts(content: string): CustomPrompts | null {
     }
 
     if (sections.length === 0) {
-        console.error('[ALT Generator] No H1 sections found in markdown');
+        console.error('[Auto ALT Writer] No H1 sections found in markdown');
         return null;
     }
 
@@ -536,7 +543,7 @@ function parseMarkdownPrompts(content: string): CustomPrompts | null {
             // Match by MODE comment value
             sectionMatch = findSectionMapping(section.mode);
             if (!sectionMatch) {
-                console.warn(`[ALT Generator] Unknown MODE value: "${section.mode}"`);
+                console.warn(`[Auto ALT Writer] Unknown MODE value: "${section.mode}"`);
                 continue;
             }
         } else {
@@ -546,7 +553,7 @@ function parseMarkdownPrompts(content: string): CustomPrompts | null {
                 // Generate helpful error message with suggestions
                 const allValidPatterns = SECTION_MAPPING_FLEXIBLE.map(s => s.displayName);
                 console.warn(
-                    `[ALT Generator] Unknown section title: "${section.title}"\n` +
+                    `[Auto ALT Writer] Unknown section title: "${section.title}"\n` +
                     `Valid section names (case-insensitive, spaces/hyphens optional):\n` +
                     allValidPatterns.map(p => `  - ${p}`).join('\n')
                 );
@@ -560,7 +567,7 @@ function parseMarkdownPrompts(content: string): CustomPrompts | null {
         const fullContent = `${h1Line}\n\n${contentWithoutComments}`.trim();
 
         if (fullContent.trim() === h1Line.trim() || contentWithoutComments.trim() === '') {
-            console.warn(`[ALT Generator] Empty content for section: "${section.title}"`);
+            console.warn(`[Auto ALT Writer] Empty content for section: "${section.title}"`);
             continue;
         }
 
@@ -576,7 +583,7 @@ function parseMarkdownPrompts(content: string): CustomPrompts | null {
                 if (modelValue === 'gemini-2.5-pro' || modelValue === 'gemini-2.5-flash') {
                     result[key] = modelValue;
                 } else {
-                    console.warn(`[ALT Generator] Invalid Gemini API model: "${modelValue}"`);
+                    console.warn(`[Auto ALT Writer] Invalid Gemini API model: "${modelValue}"`);
                 }
             } else if (key === 'context') {
                 // Legacy string format for context
@@ -607,7 +614,7 @@ function parseMarkdownPrompts(content: string): CustomPrompts | null {
 
     // Return null if no valid prompts were found
     if (Object.keys(result).length === 0) {
-        console.error('[ALT Generator] No valid prompts found in markdown');
+        console.error('[Auto ALT Writer] No valid prompts found in markdown');
         return null;
     }
 
@@ -639,13 +646,13 @@ export function getGeminiApiModel(customPrompts?: CustomPrompts | null): string 
  */
 export function loadCustomPrompts(): CustomPrompts | null {
     try {
-        const config = vscode.workspace.getConfiguration('altGenGemini');
+        const config = vscode.workspace.getConfiguration('autoAltWriter');
         const customPromptsPath = config.get<string>('customFilePath', '.vscode/custom-prompts.md');
 
         // Get workspace folder
         const workspaceFolders = vscode.workspace.workspaceFolders;
         if (!workspaceFolders || workspaceFolders.length === 0) {
-            console.log('[ALT Generator] No workspace folder found');
+            console.log('[Auto ALT Writer] No workspace folder found');
             return null;
         }
 
@@ -654,7 +661,7 @@ export function loadCustomPrompts(): CustomPrompts | null {
 
         // Security: Prevent path traversal attacks
         if (!isPathInWorkspace(absolutePath, workspaceRoot)) {
-            console.error('[ALT Generator] Security: Custom prompts path is outside workspace');
+            console.error('[Auto ALT Writer] Security: Custom prompts path is outside workspace');
             return null;
         }
 
@@ -682,7 +689,7 @@ export function loadCustomPrompts(): CustomPrompts | null {
         // Security: File size limit (10MB maximum)
         const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
         if (stat.size > MAX_FILE_SIZE) {
-            console.error('[ALT Generator] Prompt file too large (max 10MB)');
+            console.error('[Auto ALT Writer] Prompt file too large (max 10MB)');
             return null;
         }
 
@@ -691,7 +698,7 @@ export function loadCustomPrompts(): CustomPrompts | null {
         const parsedPrompts = parseMarkdownPrompts(fileContent);
 
         if (!parsedPrompts) {
-            console.error('[ALT Generator] Invalid custom prompts structure');
+            console.error('[Auto ALT Writer] Invalid custom prompts structure');
             return null;
         }
 
@@ -702,7 +709,7 @@ export function loadCustomPrompts(): CustomPrompts | null {
     } catch (error) {
         // Only log errors for actual problems (not "file not found")
         if (error instanceof Error && !error.message.includes('ENOENT')) {
-            console.error('[ALT Generator] Failed to load custom prompts:', error);
+            console.error('[Auto ALT Writer] Failed to load custom prompts:', error);
         }
         return null;
     }
