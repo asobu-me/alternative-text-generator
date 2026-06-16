@@ -1,11 +1,14 @@
 import * as assert from 'assert';
 import * as path from 'path';
+import * as fs from 'fs';
+import * as os from 'os';
 import {
     validateImageSrc,
     sanitizeFilePath,
     escapeHtml,
     validateRemoteImageUrl,
-    selectTrustedPromptValue
+    selectTrustedPromptValue,
+    resolveSafePromptPath
 } from '../../utils/security';
 
 suite('security', () => {
@@ -168,6 +171,83 @@ suite('security', () => {
 
         test('returns null when nothing is set', () => {
             assert.strictEqual(selectTrustedPromptValue({}), null);
+        });
+    });
+
+    suite('resolveSafePromptPath', () => {
+        let ws: string;        // workspace root (realpath-normalized)
+        let outside: string;   // a sibling dir outside the workspace
+        let home: string;      // fake home dir for ~ expansion
+
+        setup(() => {
+            const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'aaw-')));
+            ws = path.join(tmp, 'proj');
+            outside = path.join(tmp, 'proj-secrets'); // shares the "proj" prefix on purpose
+            home = path.join(tmp, 'home');
+            fs.mkdirSync(ws);
+            fs.mkdirSync(outside);
+            fs.mkdirSync(home);
+        });
+
+        test('resolves a relative path inside the workspace', () => {
+            const file = path.join(ws, '.vscode');
+            fs.mkdirSync(file);
+            fs.writeFileSync(path.join(file, 'custom-prompts.md'), '# hi');
+            const r = resolveSafePromptPath('.vscode/custom-prompts.md', false, ws, home);
+            assert.strictEqual(r, path.join(ws, '.vscode', 'custom-prompts.md'));
+        });
+
+        test('rejects a relative path that escapes the workspace via symlink', () => {
+            fs.writeFileSync(path.join(outside, 'secret.md'), 'TOP SECRET');
+            // workspace-internal symlink pointing OUT to the sibling secrets dir
+            fs.symlinkSync(path.join(outside, 'secret.md'), path.join(ws, 'link.md'));
+            const r = resolveSafePromptPath('link.md', false, ws, home);
+            assert.strictEqual(r, null);
+        });
+
+        test('rejects a symlink into a sibling dir sharing the name prefix', () => {
+            fs.writeFileSync(path.join(outside, 'p.md'), 'x');
+            fs.symlinkSync(outside, path.join(ws, 'sib')); // ws/sib -> .../proj-secrets
+            const r = resolveSafePromptPath('sib/p.md', false, ws, home);
+            assert.strictEqual(r, null);
+        });
+
+        test('allows a trusted absolute path outside the workspace', () => {
+            const abs = path.join(outside, 'global.md');
+            fs.writeFileSync(abs, '# global');
+            const r = resolveSafePromptPath(abs, true, ws, home);
+            assert.strictEqual(r, abs);
+        });
+
+        test('expands ~ for a trusted path', () => {
+            fs.writeFileSync(path.join(home, 'prompts.md'), '# home');
+            const r = resolveSafePromptPath('~/prompts.md', true, ws, home);
+            assert.strictEqual(r, path.join(home, 'prompts.md'));
+        });
+
+        test('rejects an absolute path that is NOT trusted (defensive)', () => {
+            const abs = path.join(outside, 'global.md');
+            fs.writeFileSync(abs, '# global');
+            const r = resolveSafePromptPath(abs, false, ws, home);
+            assert.strictEqual(r, null);
+        });
+
+        test('returns null for a non-existent relative path', () => {
+            assert.strictEqual(resolveSafePromptPath('nope.md', false, ws, home), null);
+        });
+
+        test('returns null when the path is a directory', () => {
+            fs.mkdirSync(path.join(ws, 'adir'));
+            assert.strictEqual(resolveSafePromptPath('adir', false, ws, home), null);
+        });
+
+        test('returns null for a file larger than 10MB', () => {
+            fs.writeFileSync(path.join(ws, 'big.md'), Buffer.alloc(10 * 1024 * 1024 + 1));
+            assert.strictEqual(resolveSafePromptPath('big.md', false, ws, home), null);
+        });
+
+        test('returns null for a relative path when there is no workspace', () => {
+            assert.strictEqual(resolveSafePromptPath('a.md', false, undefined, home), null);
         });
     });
 });

@@ -4,6 +4,7 @@
 
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import * as dns from 'dns';
 import * as net from 'net';
 
@@ -342,4 +343,83 @@ export function selectTrustedPromptValue(inspect: PromptPathInspect): SelectedPr
         return { value: inspect.defaultValue, trusted: true };
     }
     return null;
+}
+
+/** Maximum custom-prompts file size (10MB) to prevent memory exhaustion. */
+const MAX_PROMPT_FILE_SIZE = 10 * 1024 * 1024;
+
+/** Expand a leading ~ / ~/ to the given home directory. Other values pass through. */
+function expandTilde(value: string, homeDir: string): string {
+    if (value === '~') {
+        return homeDir;
+    }
+    if (value.startsWith('~/') || value.startsWith('~\\')) {
+        return path.join(homeDir, value.slice(2));
+    }
+    return value;
+}
+
+/** Return the path if it is an existing regular file within the size limit, else null. */
+function validateExistingFile(absPath: string): string | null {
+    try {
+        if (!fs.existsSync(absPath)) {
+            return null;
+        }
+        const stat = fs.statSync(absPath);
+        if (!stat.isFile() || stat.size > MAX_PROMPT_FILE_SIZE) {
+            return null;
+        }
+        return absPath;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Resolve a selected custom-prompts value to a safe absolute path, or null.
+ *
+ * - Absolute / ~ values are only honored when `trusted` is true (global/default origin);
+ *   they may point anywhere the user can read (the user chose it). ~ is expanded via homeDir.
+ * - Relative values are resolved under workspaceRoot and then re-validated with
+ *   fs.realpathSync so a symlink cannot escape the workspace (both sides are realpath'd
+ *   to absorb e.g. /tmp -> /private/tmp). A relative value with no workspace is rejected.
+ */
+export function resolveSafePromptPath(
+    value: string,
+    trusted: boolean,
+    workspaceRoot: string | undefined,
+    homeDir: string
+): string | null {
+    const expanded = expandTilde(value, homeDir);
+
+    if (path.isAbsolute(expanded)) {
+        // Reachable with an absolute path only from a trusted origin; reject otherwise.
+        if (!trusted) {
+            return null;
+        }
+        return validateExistingFile(expanded);
+    }
+
+    // Relative path: must resolve to a real file inside the workspace.
+    if (!workspaceRoot) {
+        return null;
+    }
+    const candidate = path.resolve(workspaceRoot, expanded);
+    if (!fs.existsSync(candidate)) {
+        return null;
+    }
+    let realPath: string;
+    let realRoot: string;
+    try {
+        realPath = fs.realpathSync(candidate);
+        realRoot = fs.realpathSync(workspaceRoot);
+    } catch {
+        return null;
+    }
+    // Containment check on a path-separator boundary so a sibling dir sharing the
+    // workspace name prefix (proj vs proj-secrets) is not treated as inside.
+    if (realPath !== realRoot && !realPath.startsWith(realRoot + path.sep)) {
+        return null;
+    }
+    return validateExistingFile(realPath);
 }
