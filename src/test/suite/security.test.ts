@@ -249,5 +249,20 @@ suite('security', () => {
         test('returns null for a relative path when there is no workspace', () => {
             assert.strictEqual(resolveSafePromptPath('a.md', false, undefined, home), null);
         });
+
+        test('rejects a relative .. traversal that escapes the workspace', () => {
+            fs.writeFileSync(path.join(outside, 's.md'), 'secret');
+            const r = resolveSafePromptPath('../proj-secrets/s.md', false, ws, home);
+            assert.strictEqual(r, null);
+        });
+
+        test('resolves a relative file even when the workspace root is itself a symlink', () => {
+            fs.mkdirSync(path.join(ws, 'cfg'));
+            fs.writeFileSync(path.join(ws, 'cfg', 'p.md'), '# x');
+            const wsLink = path.join(path.dirname(ws), 'proj-link');
+            fs.symlinkSync(ws, wsLink); // proj-link -> proj
+            const r = resolveSafePromptPath('cfg/p.md', false, wsLink, home);
+            assert.strictEqual(r, path.join(ws, 'cfg', 'p.md')); // realpath resolves to the real root
+        });
     });
 });

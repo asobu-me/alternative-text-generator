@@ -392,6 +392,9 @@ export function resolveSafePromptPath(
 ): string | null {
     const expanded = expandTilde(value, homeDir);
 
+    // path.isAbsolute is intentionally platform-aware: on Windows it also recognizes
+    // drive (C:\) and UNC (\\server\share) paths, so those untrusted-origin forms are
+    // caught here too. Do not replace this with a hand-rolled "/" check.
     if (path.isAbsolute(expanded)) {
         // Reachable with an absolute path only from a trusted origin; reject otherwise.
         if (!trusted) {
@@ -421,5 +424,8 @@ export function resolveSafePromptPath(
     if (realPath !== realRoot && !realPath.startsWith(realRoot + path.sep)) {
         return null;
     }
+    // TOCTOU note: a symlink could in theory be swapped between this realpath check and
+    // the caller's readFileSync. Acceptable for a local single-user dev tool reading its
+    // own workspace; the content is only sent to the API, never executed.
     return validateExistingFile(realPath);
 }
