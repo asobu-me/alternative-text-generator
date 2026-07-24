@@ -1,0 +1,65 @@
+# VSCode拡張機能のパッケージから除外するファイル
+
+# Development files
+.vscode/**
+.vscode-test/**
+src/**
+.gitignore
+.gitattributes
+
+# Build and configuration files
+tsconfig.json
+.eslintrc.json
+**/*.ts
+**/*.map
+
+# Test files
+**/test/**
+**/.eslintrc.json
+
+# Local test fixtures (sample pages and images used while developing)
+testdir/**
+
+# Cloudflare Worker source — deployed separately, never part of the extension
+proxy/**
+
+# Development notes
+docs/**
+.vsixignore
+
+# Documentation (already in README.md)
+.editorconfig
+CLAUDE.md
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Dependencies (only bundled dependencies are needed)
+node_modules/**
+!node_modules/node-fetch/**
+!node_modules/whatwg-url/**
+!node_modules/tr46/**
+!node_modules/webidl-conversions/**
+
+# Git
+.git/**
+.github/**
+
+# npm
+.npmignore
+npm-debug.log
+yarn-error.log
+
+# Claude Code (development only)
+.claude/**
+
+# User-specific files (exclude actual config, but include example)
+.vscode/alt-prompts.json
+
+# Demo media (GitHub only, exclude from extension package)
+images/**
+!images/icon.png
+
+!README.md
+!README.ja.md

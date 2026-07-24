@@ -1,0 +1,50 @@
+{
+  "displayName": "Auto ALT Text Writer",
+  "description": "Gemini APIでalt属性とaria-labelを自動生成・挿入。文脈に応じて内容を判断し、装飾画像は空に(HTML/PHP/JSX/TSXの静的パスに対応)",
+
+  "command.category": "Auto ALT Text Writer",
+  "command.generateAlt": "画像の代替テキスト(alt)を生成",
+  "command.generateVideoAriaLabel": "動画の説明を生成(aria-label または書き起こし)",
+  "command.createCustomPrompts": "カスタムプロンプトのファイルを作成",
+  "command.setApiKey": "自分のGemini APIキーを設定(自分の利用枠を使う)",
+  "command.clearApiKey": "自分のGemini APIキーを削除(共有の無料枠に戻す)",
+
+  "capabilities.untrustedWorkspaces.description": "リポジトリ側が独自のプロンプトファイルを置ける仕組みのため、Gemini APIへ送る指示文と、ソースコードに書き戻されるテキストをリポジトリ側に制御されます。",
+
+  "config.group.image": "画像",
+  "config.group.video": "動画",
+  "config.group.general": "共通",
+  "config.group.advanced": "上級",
+
+  "config.altGenerationMode.markdownDescription": "生成する `alt` を、誰に向けて書くかを選びます。",
+  "config.altGenerationMode.label.seo": "検索エンジン向け (SEO)",
+  "config.altGenerationMode.label.a11y": "スクリーンリーダー向け (A11Y)",
+  "config.altGenerationMode.enum.seo": "検索されやすい語を使って、被写体を具体的に説明します。",
+  "config.altGenerationMode.enum.a11y": "画像が見えない人に向けて、簡潔に事実を説明します。",
+
+  "config.decorativeKeywords.markdownDescription": "ファイル名にこれらの語を含む画像は、飾りとみなして代替テキストを作らず、`alt=\"\"`(空)のままにします。区切り線や背景など、読み上げても意味のない画像を除外するための設定です。\n\n判定はファイル名の部分一致で、大文字・小文字は区別しません。`bg-` のように末尾のハイフンを残しておくと、`background.jpg` のような語まで巻き込むのを防げます。",
+
+  "config.videoDescriptionMode.markdownDescription": "動画の説明を、短いラベルとして付けるか、内容を書き起こした文章として残すかを選びます。",
+  "config.videoDescriptionMode.label.summary": "要約 (aria-label)",
+  "config.videoDescriptionMode.label.transcript": "書き起こし (コメント)",
+  "config.videoDescriptionMode.enum.summary": "再生しなくても何の動画か分かる短いラベルを、`aria-label` 属性として追加します。",
+  "config.videoDescriptionMode.enum.transcript": "話している内容と映像の様子をまとめた文章を、タグの直前にコメントとして書き出します。`aria-label` は追加しません。",
+
+  "config.outputLanguage.markdownDescription": "生成するテキストの言語を選びます。",
+  "config.outputLanguage.label.auto": "自動",
+  "config.outputLanguage.label.ja": "日本語",
+  "config.outputLanguage.label.en": "English",
+  "config.outputLanguage.enum.auto": "VS Codeの表示言語に合わせます。日本語UIなら日本語、それ以外は英語になります。",
+  "config.outputLanguage.enum.ja": "常に日本語で生成します。",
+  "config.outputLanguage.enum.en": "常に英語で生成します。",
+
+  "config.insertionMode.markdownDescription": "生成した内容をタグへ挿入する前に、確認をはさむかどうかを選びます。",
+  "config.insertionMode.label.auto": "自動で挿入",
+  "config.insertionMode.label.confirm": "確認してから挿入",
+  "config.insertionMode.enum.auto": "生成できたものから順に、そのままタグへ挿入します。",
+  "config.insertionMode.enum.confirm": "生成結果を1件ずつ表示し、採用したものだけを挿入します。",
+
+  "config.contextAnalysisEnabled.markdownDescription": "画像や動画の周辺テキストを分析します。周辺テキストが既に内容を説明している場合は `alt=\"\"` にして、スクリーンリーダーが同じ内容を二重に読み上げないようにします。",
+
+  "config.customFilePath.markdownDescription": "既定のプロンプトをカスタマイズしたいときに指定します。形式はMarkdownファイルで、書き方にルールがあります。\n\nコマンド **「Auto ALT Text Writer: カスタムプロンプトのファイルを作成」** で、ルールに沿った雛形を作れます。[書き方とファイルの置き場所](https://github.com/asobu-me/auto-alt-text-writer/blob/main/README.ja.md#カスタムプロンプト)"
+}

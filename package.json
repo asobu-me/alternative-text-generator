@@ -1,0 +1,261 @@
+{
+  "name": "auto-alt-text-writer",
+  "displayName": "%displayName%",
+  "description": "%description%",
+  "version": "1.0.0",
+  "publisher": "asobu-me",
+  "author": {
+    "name": "asobu.me"
+  },
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/asobu-me/auto-alt-text-writer"
+  },
+  "bugs": {
+    "url": "https://github.com/asobu-me/auto-alt-text-writer/issues"
+  },
+  "homepage": "https://note.com/asobu-me",
+  "keywords": [
+    "alt",
+    "alt-text",
+    "accessibility",
+    "a11y",
+    "seo",
+    "gemini",
+    "ai",
+    "image",
+    "video",
+    "aria-label"
+  ],
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "l10n": "./l10n",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "%capabilities.untrustedWorkspaces.description%"
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "auto-alt-writer.generateAlt",
+        "category": "%command.category%",
+        "title": "%command.generateAlt%"
+      },
+      {
+        "command": "auto-alt-writer.generateVideoAriaLabel",
+        "category": "%command.category%",
+        "title": "%command.generateVideoAriaLabel%"
+      },
+      {
+        "command": "auto-alt-writer.createCustomPrompts",
+        "category": "%command.category%",
+        "title": "%command.createCustomPrompts%"
+      },
+      {
+        "command": "auto-alt-writer.setApiKey",
+        "category": "%command.category%",
+        "title": "%command.setApiKey%"
+      },
+      {
+        "command": "auto-alt-writer.clearApiKey",
+        "category": "%command.category%",
+        "title": "%command.clearApiKey%"
+      }
+    ],
+    "configuration": [
+      {
+        "id": "autoAltWriter.image",
+        "title": "%config.group.image%",
+        "order": 0,
+        "properties": {
+          "autoAltWriter.altGenerationMode": {
+            "order": 0,
+            "type": "string",
+            "default": "SEO",
+            "enum": [
+              "SEO",
+              "A11Y"
+            ],
+            "enumItemLabels": [
+              "%config.altGenerationMode.label.seo%",
+              "%config.altGenerationMode.label.a11y%"
+            ],
+            "enumDescriptions": [
+              "%config.altGenerationMode.enum.seo%",
+              "%config.altGenerationMode.enum.a11y%"
+            ],
+            "markdownDescription": "%config.altGenerationMode.markdownDescription%"
+          },
+          "autoAltWriter.decorativeKeywords": {
+            "order": 1,
+            "type": "array",
+            "default": [
+              "icon-",
+              "bg-",
+              "deco-"
+            ],
+            "items": {
+              "type": "string"
+            },
+            "markdownDescription": "%config.decorativeKeywords.markdownDescription%"
+          }
+        }
+      },
+      {
+        "id": "autoAltWriter.video",
+        "title": "%config.group.video%",
+        "order": 1,
+        "properties": {
+          "autoAltWriter.videoDescriptionMode": {
+            "order": 0,
+            "type": "string",
+            "default": "summary",
+            "enum": [
+              "summary",
+              "transcript"
+            ],
+            "enumItemLabels": [
+              "%config.videoDescriptionMode.label.summary%",
+              "%config.videoDescriptionMode.label.transcript%"
+            ],
+            "enumDescriptions": [
+              "%config.videoDescriptionMode.enum.summary%",
+              "%config.videoDescriptionMode.enum.transcript%"
+            ],
+            "markdownDescription": "%config.videoDescriptionMode.markdownDescription%"
+          }
+        }
+      },
+      {
+        "id": "autoAltWriter.general",
+        "title": "%config.group.general%",
+        "order": 2,
+        "properties": {
+          "autoAltWriter.outputLanguage": {
+            "order": 0,
+            "type": "string",
+            "default": "auto",
+            "enum": [
+              "auto",
+              "ja",
+              "en"
+            ],
+            "enumItemLabels": [
+              "%config.outputLanguage.label.auto%",
+              "%config.outputLanguage.label.ja%",
+              "%config.outputLanguage.label.en%"
+            ],
+            "enumDescriptions": [
+              "%config.outputLanguage.enum.auto%",
+              "%config.outputLanguage.enum.ja%",
+              "%config.outputLanguage.enum.en%"
+            ],
+            "markdownDescription": "%config.outputLanguage.markdownDescription%"
+          },
+          "autoAltWriter.insertionMode": {
+            "order": 1,
+            "type": "string",
+            "default": "confirm",
+            "enum": [
+              "auto",
+              "confirm"
+            ],
+            "enumItemLabels": [
+              "%config.insertionMode.label.auto%",
+              "%config.insertionMode.label.confirm%"
+            ],
+            "enumDescriptions": [
+              "%config.insertionMode.enum.auto%",
+              "%config.insertionMode.enum.confirm%"
+            ],
+            "markdownDescription": "%config.insertionMode.markdownDescription%"
+          },
+          "autoAltWriter.contextAnalysisEnabled": {
+            "order": 2,
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "%config.contextAnalysisEnabled.markdownDescription%"
+          }
+        }
+      },
+      {
+        "id": "autoAltWriter.advanced",
+        "title": "%config.group.advanced%",
+        "order": 3,
+        "properties": {
+          "autoAltWriter.customFilePath": {
+            "order": 0,
+            "type": "string",
+            "default": ".vscode/custom-prompts.md",
+            "scope": "resource",
+            "markdownDescription": "%config.customFilePath.markdownDescription%"
+          }
+        }
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "auto-alt-writer.generateAlt",
+        "key": "ctrl+k ctrl+a",
+        "mac": "cmd+alt+a",
+        "when": "editorTextFocus && editorLangId =~ /^(html|php|javascript|javascriptreact|typescript|typescriptreact|vue|svelte|astro|blade|twig|handlebars|markdown)$/"
+      },
+      {
+        "command": "auto-alt-writer.generateVideoAriaLabel",
+        "key": "ctrl+k ctrl+v",
+        "mac": "cmd+alt+v",
+        "when": "editorTextFocus && editorLangId =~ /^(html|php|javascript|javascriptreact|typescript|typescriptreact|vue|svelte|astro|blade|twig|handlebars|markdown)$/"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "auto-alt-writer.generateAlt",
+          "group": "1_modification@1",
+          "when": "editorTextFocus && editorLangId =~ /^(html|php|javascript|javascriptreact|typescript|typescriptreact|vue|svelte|astro|blade|twig|handlebars|markdown)$/"
+        },
+        {
+          "command": "auto-alt-writer.generateVideoAriaLabel",
+          "group": "1_modification@2",
+          "when": "editorTextFocus && editorLangId =~ /^(html|php|javascript|javascriptreact|typescript|typescriptreact|vue|svelte|astro|blade|twig|handlebars|markdown)$/"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^18.0.0",
+    "@types/node-fetch": "^2.6.13",
+    "@types/vscode": "^1.80.0",
+    "@typescript-eslint/eslint-plugin": "^5.0.0",
+    "@typescript-eslint/parser": "^5.0.0",
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^8.0.0",
+    "mocha": "^10.8.2",
+    "typescript": "^5.0.0"
+  },
+  "dependencies": {
+    "node-fetch": "^2.6.12"
+  }
+}

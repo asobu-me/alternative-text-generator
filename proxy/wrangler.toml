@@ -1,0 +1,24 @@
+name = "auto-alt-writer-proxy"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# Public entry point. The extension calls https://api.asobu.me/auto-alt-writer/ ;
+# this route maps that path to the Worker. The /auto-alt-writer/ prefix namespaces
+# this app so other apps can share api.asobu.me later. The Worker ignores the path,
+# so no code depends on it.
+routes = [
+  { pattern = "api.asobu.me/auto-alt-writer/*", zone_name = "asobu.me" }
+]
+
+# --- Optional: per-IP rate limiting via Workers KV ---------------------------
+# The Worker enforces a rate limit only when a KV namespace named RATE_LIMIT is
+# bound. To enable it:
+#   1) npx wrangler kv namespace create RATE_LIMIT
+#   2) Paste the printed id below and uncomment this block:
+#
+# [[kv_namespaces]]
+# binding = "RATE_LIMIT"
+# id = "PASTE_YOUR_KV_NAMESPACE_ID_HERE"
+#
+# Alternatively (or additionally) add a Cloudflare "Rate limiting rule" on the
+# asobu.me zone scoped to the /auto-alt-writer/* path — atomic, zero code, free plan.

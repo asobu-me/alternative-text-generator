@@ -1,0 +1,18 @@
+node_modules
+out
+.vscode-test
+.DS_Store
+CLAUDE.md
+.vscode/
+.claude/
+# Build artifact from `vsce package`
+*.vsix
+
+# Local test fixtures and scratch files (never distributed or committed)
+testdir/
+*.bak
+
+# Dated plans and design notes written before each change. They describe the
+# state the code was in at the time, so they go stale the moment the change
+# lands. The living rationale is in CLAUDE.md, which is also local-only.
+docs/superpowers/

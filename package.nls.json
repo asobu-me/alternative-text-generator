@@ -1,0 +1,50 @@
+{
+  "displayName": "Auto ALT Text Writer",
+  "description": "Auto-generate and insert alt and aria-label attributes with Gemini API. Context-aware, and leaves decorative images empty (HTML/PHP/JSX/TSX, static paths).",
+
+  "command.category": "Auto ALT Text Writer",
+  "command.generateAlt": "Generate alt text for images",
+  "command.generateVideoAriaLabel": "Generate video description (aria-label or transcript)",
+  "command.createCustomPrompts": "Create a custom prompts file",
+  "command.setApiKey": "Set your Gemini API key (use your own quota)",
+  "command.clearApiKey": "Remove your Gemini API key (back to the shared free tier)",
+
+  "capabilities.untrustedWorkspaces.description": "A repository can supply its own prompts file, which controls the instructions sent to the Gemini API and the text written back into your source files.",
+
+  "config.group.image": "Images",
+  "config.group.video": "Videos",
+  "config.group.general": "General",
+  "config.group.advanced": "Advanced",
+
+  "config.altGenerationMode.markdownDescription": "What the generated `alt` text is written for.",
+  "config.altGenerationMode.label.seo": "Search engines (SEO)",
+  "config.altGenerationMode.label.a11y": "Screen readers (A11Y)",
+  "config.altGenerationMode.enum.seo": "Descriptive text that names the subject using the words people would search for.",
+  "config.altGenerationMode.enum.a11y": "Concise, factual text written for someone who cannot see the image.",
+
+  "config.decorativeKeywords.markdownDescription": "Images whose filename contains any of these words are treated as decoration: no alt text is generated and `alt=\"\"` is left in place. Use it to skip dividers, backgrounds and logos that mean nothing when read aloud.\n\nMatching is a case-insensitive substring match on the filename. Keep the trailing hyphen (`bg-`) so that words such as `background.jpg` are not caught as well.",
+
+  "config.videoDescriptionMode.markdownDescription": "Whether to describe the video as a short label or as a written-out account of its content.",
+  "config.videoDescriptionMode.label.summary": "Summary (aria-label)",
+  "config.videoDescriptionMode.label.transcript": "Transcript (comment)",
+  "config.videoDescriptionMode.enum.summary": "A short label that tells you what the video is without playing it, added as an `aria-label` attribute.",
+  "config.videoDescriptionMode.enum.transcript": "What is said and what is shown, written out above the tag as a comment. No `aria-label` is added.",
+
+  "config.outputLanguage.markdownDescription": "Language of the generated text.",
+  "config.outputLanguage.label.auto": "Auto",
+  "config.outputLanguage.label.ja": "Japanese",
+  "config.outputLanguage.label.en": "English",
+  "config.outputLanguage.enum.auto": "Follow the VS Code display language: Japanese when the UI is Japanese, English otherwise.",
+  "config.outputLanguage.enum.ja": "Always generate Japanese.",
+  "config.outputLanguage.enum.en": "Always generate English.",
+
+  "config.insertionMode.markdownDescription": "Whether to review the generated text before it goes into the tag.",
+  "config.insertionMode.label.auto": "Insert automatically",
+  "config.insertionMode.label.confirm": "Confirm before inserting",
+  "config.insertionMode.enum.auto": "Insert each result into the tag as soon as it is generated.",
+  "config.insertionMode.enum.confirm": "Show each result one at a time and insert only the ones you keep.",
+
+  "config.contextAnalysisEnabled.markdownDescription": "Analyze the text around each image or video. When the surrounding text already describes it, `alt=\"\"` is used so screen readers do not read the same thing twice.",
+
+  "config.customFilePath.markdownDescription": "Point this at a Markdown file to customize the built-in prompts. The file has to follow a specific format.\n\nRun the command **Auto ALT Text Writer: Create a custom prompts file** to get one that already does. [How to write it, and where it can live](https://github.com/asobu-me/auto-alt-text-writer/blob/main/README.md#custom-prompts)"
+}
